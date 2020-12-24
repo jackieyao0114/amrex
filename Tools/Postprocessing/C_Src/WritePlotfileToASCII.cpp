@@ -99,7 +99,10 @@ main (int   argc,
        for (auto k = lo.z; k <= hi.z; ++k) {
        for (auto j = lo.y; j <= hi.y; ++j) {
        for (auto i = lo.x; i <= hi.x; ++i) {
-            Print() << i << " " << j << " " << k << " " << n << " " << mfdata(i,j,k,n) << std::endl;
+           if (n == 0 && i == 512 && j == 2){ // only print Ey
+               Print() << k << " " << mfdata(i,j,k,n) << std::endl;
+           }
+            
        }
        }
        }
