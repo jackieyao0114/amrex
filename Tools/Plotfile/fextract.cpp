@@ -20,8 +20,11 @@ void main_main()
     bool center = true;
     int coarse_level = 0;
     int fine_level = -1;  // This will be fixed later
+    Real xcoord = std::numeric_limits<Real>::lowest();
     Real ycoord = std::numeric_limits<Real>::lowest();
+    Real zcoord = std::numeric_limits<Real>::lowest();
     bool scientific = false;
+    bool csv = false;
     int  precision = 17;
     Real tolerance = std::numeric_limits<Real>::lowest();
     bool print_info = false;
@@ -35,8 +38,12 @@ void main_main()
             idir = std::stoi(amrex::get_command_argument(++farg));
         } else if (name == "-v" || name == "--variable") {
             varnames_arg = amrex::get_command_argument(++farg);
+        } else if (name == "-x") {
+            xcoord = std::stod(amrex::get_command_argument(++farg));
         } else if (name == "-y") {
             ycoord = std::stod(amrex::get_command_argument(++farg));
+        } else if (name == "-z") {
+            zcoord = std::stod(amrex::get_command_argument(++farg));
         } else if (name == "-l" || name == "--lower_left") {
             center = false;
         } else if (name == "-c" || name == "--coarse_level") {
@@ -45,6 +52,8 @@ void main_main()
             fine_level = std::stoi(amrex::get_command_argument(++farg));
         } else if (name == "-e" || name == "--scientific") {
             scientific = true;
+        } else if (name == "-csv" || name == "--csv") {
+            csv = true;
         } else if (name == "-p" || name == "--precision") {
             precision = std::stoi(amrex::get_command_argument(++farg));
         } else if (name == "-t" || name == "--tolerance") {
@@ -77,7 +86,7 @@ void main_main()
             << "                                         multiple variables)\n"
             << "      [-l|--lower_left]                : slice through lower left corner\n"
             << "                                         instead of center\n"
-            << "      [-y]                             : y-coordinate to pass through\n"
+            << "      [-x][-y][-z]                     : (x,y,z)-coordinate to pass through\n"
             << "                                         (overrides center/lower-left)\n"
             << "      [-c|--coarse_level] coarse level : coarsest level to extract from\n"
             << "      [-f|--fine_level]   fine level   : finest level to extract from\n"
@@ -102,19 +111,6 @@ void main_main()
     }
 
     PlotFileData pf(pltfile);
-    const int dim = pf.spaceDim();
-
-    if (idir < 0 || idir >= dim) {
-        amrex::Print() << " invalid direction\n";
-        return;
-    } else if (idir == 0) {
-        amrex::Print() << " slicing along x-direction and output to " << slicefile << "\n";
-    } else if (idir == 1) {
-        amrex::Print() << " slicing along y-direction and output to " << slicefile << "\n";
-    } else if (idir == 2) {
-        amrex::Print() << " slicing along z-direction and output to " << slicefile << "\n";
-    }
-
     const Vector<std::string>& var_names_pf = pf.varNames();
 
     Vector<std::string> var_names;
@@ -152,8 +148,21 @@ void main_main()
         kloc = (hi0.z-lo0.z+1)/2 + lo0.z;
     }
 
-    if (ycoord > -1.e-36 && AMREX_SPACEDIM >= 2) {
+    if (xcoord > -1.e36 && AMREX_SPACEDIM >= 1) {
+        // we specified the x value to pass through
+        iloc = hi0.x;
+        for (int i = lo0.x; i <= hi0.x; ++i) {
+            amrex::Real xc = problo[0] + (i+0.5)*dx0[0];
+            if (xc > xcoord) {
+                iloc = i;
+                break;
+            }
+        }
+    }
+
+    if (ycoord > -1.e36 && AMREX_SPACEDIM >= 2) {
         // we specified the y value to pass through
+        jloc = hi0.y;
         for (int j = lo0.y; j <= hi0.y; ++j) {
             amrex::Real yc = problo[1] + (j+0.5)*dx0[1];
             if (yc > ycoord) {
@@ -162,6 +171,32 @@ void main_main()
             }
         }
     }
+
+    if (zcoord > -1.e36 && AMREX_SPACEDIM == 3) {
+        // we specified the z value to pass through
+        kloc = hi0.z;
+        for (int k = lo0.z; k <= hi0.z; ++k) {
+            amrex::Real zc = problo[2] + (k+0.5)*dx0[2];
+            if (zc > zcoord) {
+                kloc = k;
+                break;
+            }
+        }
+    }
+
+    const int dim = pf.spaceDim();
+
+    if (idir < 0 || idir >= dim) {
+        amrex::Print() << " invalid direction\n";
+        return;
+    } else if (idir == 0) {
+        amrex::Print() << " slicing along x-direction at coarse grid (j,k)=(" << jloc << "," << kloc << ") and output to " << slicefile << "\n";
+    } else if (idir == 1) {
+        amrex::Print() << " slicing along y-direction at coarse grid (i,k)=(" << iloc << "," << kloc << ") and output to " << slicefile << "\n";
+    } else if (idir == 2) {
+        amrex::Print() << " slicing along z-direction at coarse grid (i,j)=(" << iloc << "," << jloc << ") and output to " << slicefile << "\n";
+    }
+
 
     const IntVect ivloc{AMREX_D_DECL(iloc,jloc,kloc)};
 
@@ -306,37 +341,55 @@ void main_main()
         std::ofstream ofs(slicefile, std::ios::trunc);
 
         if (scientific) {
-            ofs << std::scientific;
+          ofs << std::scientific;
         }
 
-        ofs << "# 1-d slice in " << dirstr << "-direction, file: " << pltfile << "\n";
-        ofs << "# time = " << std::setw(20) << std::setprecision(precision) << pf.time() << "\n";
-
-        ofs << "#" << std::setw(24) << dirstr;
-        for (auto const& vname : var_names) {
-            ofs << " " <<  std::setw(24) << std::right << vname;
+        if (csv)
+        {
+           ofs << std::setw(24) << std::left << dirstr;
+           for (auto const& vname : var_names) {
+              ofs << ", " <<  std::setw(24) << std::left << vname;
+           }
+           ofs << "\n";
+           for (int i = 0; i < posidx.size(); ++i) {
+              ofs << std::setw(25) << std::left << std::setprecision(17) << posidx[i].first;
+              for (int j = 0; j < var_names.size(); ++j) {
+                  ofs << ", " << std::setw(25) << std::left << std::setprecision(17) << data[j][posidx[i].second];
+              }
+              ofs << "\n";
+           }
         }
-        ofs << "\n";
+        else
+        {
+           ofs << "# 1-d slice in " << dirstr << "-direction, file: " << pltfile << "\n";
+           ofs << "# time = " << std::setw(20) << std::setprecision(precision) << pf.time() << "\n";
 
-        for (int i = 0; i < posidx.size(); ++i) {
-            ofs << std::setw(25) << std::right << std::setprecision(precision) << posidx[i].first;
-            for (int j = 0; j < var_names.size(); ++j) {
-                if (std::abs(data[j][posidx[i].second])< tolerance ) data[j][posidx[i].second] = 0.;
-                ofs << std::setw(25) << std::right << std::setprecision(precision) << data[j][posidx[i].second];
-            }
-            ofs << "\n";
-        }
+           ofs << "#" << std::setw(24) << dirstr;
+           for (auto const& vname : var_names) {
+             ofs << " " <<  std::setw(24) << std::right << vname;
+           }
+           ofs << "\n";
 
-        if (print_info) {
-            // job_info? if so write it out to the slice file end
-            std::ifstream jobinfo(pltfile+"/job_info");
-            if (jobinfo.good()) {
+           for (int i = 0; i < posidx.size(); ++i) {
+             ofs << std::setw(25) << std::right << std::setprecision(precision) << posidx[i].first;
+             for (int j = 0; j < var_names.size(); ++j) {
+               if (std::abs(data[j][posidx[i].second])< tolerance ) data[j][posidx[i].second] = 0.;
+               ofs << std::setw(25) << std::right << std::setprecision(precision) << data[j][posidx[i].second];
+             }
+             ofs << "\n";
+           }
+
+           if (print_info) {
+             // job_info? if so write it out to the slice file end
+             std::ifstream jobinfo(pltfile+"/job_info");
+             if (jobinfo.good()) {
                 ofs << "\n";
                 std::string s;
                 while (std::getline(jobinfo, s)) {
                     ofs << "#" << s << "\n";
                 }
-            }
+             }
+           }
         }
     }
 }
