@@ -979,10 +979,8 @@ clearParticles ()
 
     for (int lev = 0; lev < static_cast<int>(m_particles.size()); ++lev)
     {
-        for (auto& kv : m_particles[lev])
-        {
-            kv.second.resize(0);
-        }
+        for (auto& kv : m_particles[lev]) { kv.second.resize(0); }
+        particle_detail::clearEmptyEntries(m_particles[lev]);
     }
 }
 
@@ -1241,21 +1239,9 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
         }
     }
 
-    // Remove any map entries for which the particle container is now empty.
     for (int lev = lev_min; lev <= lev_max; lev++)
     {
-        auto& pmap = m_particles[lev];
-        for (auto pmap_it = pmap.begin(); pmap_it != pmap.end(); /* no ++ */)
-        {
-            if (pmap_it->second.empty())
-            {
-                pmap.erase(pmap_it++);
-            }
-            else
-            {
-                ++pmap_it;
-            }
-        }
+        particle_detail::clearEmptyEntries(m_particles[lev]);
     }
 
     if (ParallelDescriptor::UseGpuAwareMpi())
@@ -1503,17 +1489,7 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
   }
 
   for (int lev = lev_min; lev <= lev_max; lev++) {
-      auto& pmap = m_particles[lev];
-      for (auto pmap_it = pmap.begin(); pmap_it != pmap.end(); /* no ++ */) {
-
-          // Remove any map entries for which the particle container is now empty.
-          if (pmap_it->second.empty()) {
-              pmap.erase(pmap_it++);
-          }
-          else {
-              ++pmap_it;
-          }
-      }
+      particle_detail::clearEmptyEntries(m_particles[lev]);
   }
 
   // Second pass - for each tile in parallel, collect the particles we are owed from all thread's buffers.
@@ -1587,15 +1563,7 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
       }
   }
 
-  // remove any empty map entries from not_ours
-  for (auto pmap_it = not_ours.begin(); pmap_it != not_ours.end(); /* no ++ */) {
-      if (pmap_it->second.empty()) {
-          not_ours.erase(pmap_it++);
-      }
-      else {
-          ++pmap_it;
-      }
-  }
+  particle_detail::clearEmptyEntries(not_ours);
 
   if (int(m_particles.size()) > theEffectiveFinestLevel+1) {
       // Looks like we lost an AmrLevel on a regrid.
@@ -1959,8 +1927,6 @@ ParticleContainer<NStructReal,NStructInt,NArrayReal, NArrayInt, Allocator>
 {
     BL_PROFILE("ParticleContainer::AddParticlesAtLevel()");
 
-    //    if (particles.size() == 0) return;
-
     if (int(m_particles.size()) < level+1)
     {
         if (Verbose())
@@ -1977,20 +1943,12 @@ ParticleContainer<NStructReal,NStructInt,NArrayReal, NArrayInt, Allocator>
         }
     }
 
-    ParticleLocData pld;
-
-    auto src = particles.getParticleTileData();
-
-    for (int i = 0; i < particles.numParticles(); ++i) {
-        SuperParticleType p = src.getSuperParticle(i);
-        if (p.id() > 0)
-        {
-            if (!Where(p, pld, level, level, nGrow))
-                amrex::Abort("ParticleContainerAddParticlesAtLevel(): Can't add outside of domain\n");
-            m_particles[pld.m_lev][std::make_pair(pld.m_grid, pld.m_tile)].push_back(p);
-        }
-    }
-
+    auto& ptile = DefineAndReturnParticleTile(level, 0, 0);
+    int old_np = ptile.size();
+    int num_to_add = particles.size();
+    int new_np = old_np + num_to_add;
+    ptile.resize(new_np);
+    amrex::copyParticles(ptile, particles, 0, old_np, num_to_add);
     Redistribute(level, level, nGrow);
     particles.resize(0);
 }
