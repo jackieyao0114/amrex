@@ -32,13 +32,16 @@ if( AMReX_AMRLEVEL )
 endif()
 
 #
-# Pareticle  based adaptors and bridges
+# Particle based adaptors and bridges
 #
 if ( AMReX_PARTICLES )
    list ( APPEND amrex_sensei_sources
       AMReX_ParticleDataAdaptor.H
       AMReX_ParticleDataAdaptorI.H
-      AMReX_ParticleInSituBridge.H )
+      AMReX_ParticleInSituBridge.H
+      AMReX_AmrMeshParticleDataAdaptor.H
+      AMReX_AmrMeshParticleDataAdaptorI.H
+      AMReX_AmrMeshParticleInSituBridge.H )
 
    if( AMReX_AMRLEVEL )
       list ( APPEND amrex_sensei_sources
