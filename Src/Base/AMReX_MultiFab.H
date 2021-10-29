@@ -52,8 +52,8 @@ public:
     * \param ngrow number of cells the region grows
     * \param info MFInfo
 
-    * The size of the FArrayBox is given by the Box grown by ngrow and
-    * the number of components is given by ncomp.  If info is set to
+    * The size of the FArrayBox is given by the Box grown by ngrow, and
+    * the number of components is given by ncomp. If info is set to
     * not allocating memory, then no FArrayBoxes are allocated at
     * this time but can be defined later.
     */
@@ -169,6 +169,13 @@ public:
     Real norm0 (const iMultiFab& mask, int comp = 0, int nghost = 0, bool local = false) const;
     Real norminf (const iMultiFab& mask, int comp = 0, int nghost = 0, bool local = false) const {
         return norm0(mask,comp,nghost,local);
+    }
+
+    Real norm0 (int comp, int ncomp, IntVect const& nghost, bool local = false,
+                bool ignore_covered = false) const;
+    Real norminf (int comp, int ncomp, IntVect const& nghost, bool local = false,
+                  bool ignore_covered = false) const {
+        return norm0(comp, ncomp, nghost, local, ignore_covered);
     }
 
     /**
@@ -657,6 +664,11 @@ public:
     //! Sync up nodal data with owners overriding non-owners
     void OverrideSync (const Periodicity& period = Periodicity::NonPeriodic());
     void OverrideSync (const iMultiFab& msk, const Periodicity& period = Periodicity::NonPeriodic());
+
+    void OverrideSync_nowait (const Periodicity& period = Periodicity::NonPeriodic());
+    void OverrideSync_nowait (const iMultiFab& msk, const Periodicity& period = Periodicity::NonPeriodic());
+    void OverrideSync_finish ();
+
 
     static void Initialize ();
     static void Finalize ();

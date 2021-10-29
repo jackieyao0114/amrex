@@ -50,6 +50,8 @@ EXP	([Ee][-+]?[0-9]+)
 "tanh"        { amrex_parserlval.f1 = amrex::PARSER_TANH;      return F1; }
 "abs"         { amrex_parserlval.f1 = amrex::PARSER_ABS;       return F1; }
 "fabs"        { amrex_parserlval.f1 = amrex::PARSER_ABS;       return F1; }
+"floor"       { amrex_parserlval.f1 = amrex::PARSER_FLOOR;     return F1; }
+"ceil"        { amrex_parserlval.f1 = amrex::PARSER_CEIL;      return F1; }
 "**"          { amrex_parserlval.f2 = amrex::PARSER_POW;       return POW;}
 "^"           { amrex_parserlval.f2 = amrex::PARSER_POW;       return POW;}
 ">="          { amrex_parserlval.f2 = amrex::PARSER_GEQ;       return GEQ;}
@@ -79,6 +81,6 @@ EXP	([Ee][-+]?[0-9]+)
 "\n"    { return EOL; }
 
  /* everything else */
-.	{ amrex_parsererror("Unknown character %c\n", *amrex_parsertext); }
+.	{ amrex_parsererror("Unknown character %c", *amrex_parsertext); }
 
 %%

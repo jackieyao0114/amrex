@@ -172,6 +172,129 @@ void mf_cell_bilin_interp (int i, int j, int k, int n, Array4<Real> const& fine,
         crse(ic+sx,jc+sy,kc+sz,n+ccomp)*(Real(1.0)-wx)*(Real(1.0)-wy)*(Real(1.0)-wz);
 }
 
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void mf_nodebilin_interp (int i, int j, int k, int n, Array4<Real> const& fine, int fcomp,
+                          Array4<Real const> const& crse, int ccomp, IntVect const& ratio) noexcept
+{
+    int ic = amrex::coarsen(i,ratio[0]);
+    int jc = amrex::coarsen(j,ratio[1]);
+    int kc = amrex::coarsen(k,ratio[2]);
+    int ioff = i - ic*ratio[0];
+    int joff = j - jc*ratio[1];
+    int koff = k - kc*ratio[2];
+    Real rxinv = Real(1.0) / Real(ratio[0]);
+    Real ryinv = Real(1.0) / Real(ratio[1]);
+    Real rzinv = Real(1.0) / Real(ratio[2]);
+    if (ioff != 0 && joff != 0 && koff != 0) {
+        // Fine node at center of cell
+        fine(i,j,k,n+fcomp) = rxinv * ryinv * rzinv *
+            (crse(ic  ,jc  ,kc  ,n+ccomp) * (ratio[0]-ioff) * (ratio[1]-joff) * (ratio[2]-koff) +
+             crse(ic+1,jc  ,kc  ,n+ccomp) * (         ioff) * (ratio[1]-joff) * (ratio[2]-koff) +
+             crse(ic  ,jc+1,kc  ,n+ccomp) * (ratio[0]-ioff) * (         joff) * (ratio[2]-koff) +
+             crse(ic+1,jc+1,kc  ,n+ccomp) * (         ioff) * (         joff) * (ratio[2]-koff) +
+             crse(ic  ,jc  ,kc+1,n+ccomp) * (ratio[0]-ioff) * (ratio[1]-joff) * (         koff) +
+             crse(ic+1,jc  ,kc+1,n+ccomp) * (         ioff) * (ratio[1]-joff) * (         koff) +
+             crse(ic  ,jc+1,kc+1,n+ccomp) * (ratio[0]-ioff) * (         joff) * (         koff) +
+             crse(ic+1,jc+1,kc+1,n+ccomp) * (         ioff) * (         joff) * (         koff));
+    } else if (joff != 0 && koff != 0) {
+        // Node on a Y-Z face
+        fine(i,j,k,n+fcomp) = ryinv * rzinv *
+            (crse(ic,jc  ,kc  ,n+ccomp) * (ratio[1]-joff) * (ratio[2]-koff) +
+             crse(ic,jc+1,kc  ,n+ccomp) * (         joff) * (ratio[2]-koff) +
+             crse(ic,jc  ,kc+1,n+ccomp) * (ratio[1]-joff) * (         koff) +
+             crse(ic,jc+1,kc+1,n+ccomp) * (         joff) * (         koff));
+    } else if (ioff != 0 && koff != 0) {
+        // Node on a Z-X face
+        fine(i,j,k,n+fcomp) = rxinv * rzinv *
+            (crse(ic  ,jc,kc  ,n+ccomp) * (ratio[0]-ioff) * (ratio[2]-koff) +
+             crse(ic+1,jc,kc  ,n+ccomp) * (         ioff) * (ratio[2]-koff) +
+             crse(ic  ,jc,kc+1,n+ccomp) * (ratio[0]-ioff) * (         koff) +
+             crse(ic+1,jc,kc+1,n+ccomp) * (         ioff) * (         koff));
+    } else if (ioff != 0 && joff != 0) {
+        // Node on a X-Y face
+        fine(i,j,k,n+fcomp) = rxinv * ryinv *
+            (crse(ic  ,jc  ,kc,n+ccomp) * (ratio[0]-ioff) * (ratio[1]-joff) +
+             crse(ic+1,jc  ,kc,n+ccomp) * (         ioff) * (ratio[1]-joff) +
+             crse(ic  ,jc+1,kc,n+ccomp) * (ratio[0]-ioff) * (         joff) +
+             crse(ic+1,jc+1,kc,n+ccomp) * (         ioff) * (         joff));
+    } else if (ioff != 0) {
+        // Node on X line
+        fine(i,j,k,n+fcomp) = rxinv*((ratio[0]-ioff)*crse(ic  ,jc,kc,n+ccomp) +
+                                     (         ioff)*crse(ic+1,jc,kc,n+ccomp));
+    } else if (joff != 0) {
+        // Node on Y line
+        fine(i,j,k,n+fcomp) = ryinv*((ratio[1]-joff)*crse(ic,jc  ,kc,n+ccomp) +
+                                     (         joff)*crse(ic,jc+1,kc,n+ccomp));
+    } else if (koff != 0) {
+        // Node on Z line
+        fine(i,j,k,n+fcomp) = rzinv*((ratio[2]-koff)*crse(ic,jc,kc  ,n+ccomp) +
+                                     (         koff)*crse(ic,jc,kc+1,n+ccomp));
+    } else {
+        // Node coincident with coarse node
+        fine(i,j,k,n+fcomp) = crse(ic,jc,kc,n+ccomp);
+    }
 }
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void mf_cell_quadratic_calcslope (int i, int j, int k, int n,
+                                  Array4<Real const> const& crse,  int ccomp,
+                                  Array4<Real>       const& slope,
+                                  Box const& domain,
+                                  BCRec const* bc) noexcept
+{
+    int nu = ccomp + n;
+    Real sx  = mf_compute_slopes_x(i, j, k, crse, nu, domain, bc[n]);
+    Real sy  = mf_compute_slopes_y(i, j, k, crse, nu, domain, bc[n]);
+    Real sz  = mf_compute_slopes_z(i, j, k, crse, nu, domain, bc[n]);
+    Real sxx = mf_cell_quadratic_compute_slopes_xx (i, j, k, crse, nu, domain, bc[n]);
+    Real syy = mf_cell_quadratic_compute_slopes_yy (i, j, k, crse, nu, domain, bc[n]);
+    Real szz = mf_cell_quadratic_compute_slopes_zz (i, j, k, crse, nu, domain, bc[n]);
+    Real sxy = mf_cell_quadratic_compute_slopes_xy (i, j, k, crse, nu, domain, bc[n]);
+    Real sxz = mf_cell_quadratic_compute_slopes_xz (i, j, k, crse, nu, domain, bc[n]);
+    Real syz = mf_cell_quadratic_compute_slopes_yz (i, j, k, crse, nu, domain, bc[n]);
+
+    slope(i,j,k,9*n  ) = sx;  // x
+    slope(i,j,k,9*n+1) = sy;  // y
+    slope(i,j,k,9*n+2) = sz;  // z
+    slope(i,j,k,9*n+3) = sxx; // x^2
+    slope(i,j,k,9*n+4) = syy; // y^2
+    slope(i,j,k,9*n+5) = szz; // z^2
+    slope(i,j,k,9*n+6) = sxy; // xy
+    slope(i,j,k,9*n+7) = sxz; // xz
+    slope(i,j,k,9*n+8) = syz; // yz
+}
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void mf_cell_quadratic_interp (int i, int j, int k, int n,
+                               Array4<Real>       const& fine,  int fcomp,
+                               Array4<Real const> const& crse,  int ccomp,
+                               Array4<Real const> const& slope,
+                               IntVect const& ratio) noexcept
+{
+    int ic = amrex::coarsen(i, ratio[0]);
+    int jc = amrex::coarsen(j, ratio[1]);
+    int kc = amrex::coarsen(k, ratio[2]);
+    int irx = i - ic*ratio[0]; // = abs(i % ratio[0])
+    int jry = j - jc*ratio[1]; // = abs(j % ratio[1])
+    int krz = k - kc*ratio[2]; // = abs(k % ratio[2])
+
+    // Compute offsets.
+    Real xoff = ( Real(irx) + 0.5_rt ) / Real(ratio[0]) - 0.5_rt;
+    Real yoff = ( Real(jry) + 0.5_rt ) / Real(ratio[1]) - 0.5_rt;
+    Real zoff = ( Real(krz) + 0.5_rt ) / Real(ratio[2]) - 0.5_rt;
+
+    fine(i,j,k,fcomp+n) = crse(ic,jc,kc,ccomp+n)
+                          +   xoff               * slope(ic,jc,kc,9*n  )  // x
+                          +          yoff        * slope(ic,jc,kc,9*n+1)  // y
+                          +                 zoff * slope(ic,jc,kc,9*n+2)  // z
+                          + 0.5_rt * xoff * xoff * slope(ic,jc,kc,9*n+3)  // x^2
+                          + 0.5_rt * yoff * yoff * slope(ic,jc,kc,9*n+4)  // y^2
+                          + 0.5_rt * zoff * zoff * slope(ic,jc,kc,9*n+5)  // z^2
+                          +   xoff * yoff        * slope(ic,jc,kc,9*n+6)  // xy
+                          +   xoff        * zoff * slope(ic,jc,kc,9*n+7)  // xz
+                          +          yoff * zoff * slope(ic,jc,kc,9*n+8); // yz
+}
+
+} // namespace amrex
 
 #endif

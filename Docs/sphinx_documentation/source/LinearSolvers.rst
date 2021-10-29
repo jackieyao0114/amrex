@@ -8,9 +8,10 @@
 MLMG and Linear Operator Classes
 ================================
 
-``MLMG`` is a class for solving the linear system using the geometric
-multigrid method.  The constructor of ``MLMG`` takes the reference to
-:cpp:`MLLinOp`, an abstract base class of various linear operator
+Multi-Level Multi-Grid or ``MLMG`` is a class for solving the linear
+system using the geometric multigrid method.  The constructor of
+``MLMG`` takes the reference to :cpp:`MLLinOp`, an abstract base
+class of various linear operator
 classes, :cpp:`MLABecLaplacian`, :cpp:`MLPoisson`,
 :cpp:`MLNodeLaplacian`, etc.  We choose the type of linear operator
 class according to the type the linear system to solve.
@@ -108,11 +109,16 @@ and then we can use the ``MLMG`` member function
 
 to solve the problem given an initial guess and a right-hand side.
 Zero is a perfectly fine initial guess.  The two :cpp:`Reals` in the argument
-list are the targeted relative and absolute error tolerances.
-The solver will terminate when one of these targets is met.
-Set the absolute tolerance to zero if one
-does not have a good value for it.  The return value of :cpp:`solve`
-is the max-norm error.
+list are the targeted relative and absolute error tolerances. The relative
+error tolerance is hard-coded to be at least :math:`10^{-16}`.
+Given the linear system :math:`Ax=b`, the solver will terminate when the
+max-norm of the residual (:math:`b-Ax`) is less than
+:cpp:`std::max(a_tol_abs, a_tol_rel*max_norm)` where :cpp:`max_norm`
+is the max-norm of the rhs, :math:`b`, if the flag :cpp:`always_use_bnorm` is
+set to True or if the rhs max-norm is greater than or equal to the max-norm error
+of the initial guess, otherwise :cpp:`max_norm` is equal to the max-norm error
+of the initial guess.  Set the absolute tolerance to zero if one does not have a
+good value for it.  The return value of :cpp:`solve` is the max-norm error.
 
 After the solver returns successfully, if needed, we can call
 
@@ -127,7 +133,7 @@ After the solver returns successfully, if needed, we can call
 to compute residual (i.e., :math:`f - L(\phi)`) given the solution and
 the right-hand side.  For cell-centered solvers, we can also call the
 following functions to compute gradient :math:`\nabla \phi` and fluxes
-:math:`-B \nabla \phi`.
+:math:`-\beta \nabla \phi`.
 
 .. highlight:: c++
 
@@ -450,20 +456,11 @@ residual correction form of the original problem. To build Hypre, follow the nex
 
 To use hypre, one must include ``amrex/Src/Extern/HYPRE`` in the build system.
 For examples of using hypre, we refer the reader to
-``Tutorials/LinearSolvers/ABecLaplacian_C`` or ``Tutorials/LinearSolvers/NodalProjection_EB``.
+`ABecLaplacian`_ or `Nodal Projection EB`_.
 
-Caveat: to use hypre for the nodal solver,  you must either build with USE_EB = TRUE,
-or explicitly set the coarsening strategy in the calling routine to be ``RAP`` rather than ``Sigma``
-by adding
+.. _`ABecLaplacian`: https://amrex-codes.github.io/amrex/tutorials_html/LinearSolvers_Tutorial.html
 
-.. highlight:: c++
-
-::
-
-    nodal_projector.getLinOp().setCoarseningStrategy(MLNodeLaplacian::CoarseningStrategy::RAP);
-
-where
-:cpp:`nodal_projector` is the :cpp:`NodalProjector` object we have built.
+.. _`Nodal Projection EB`: https://amrex-codes.github.io/amrex/tutorials_html/LinearSolvers_Tutorial.html
 
 The following parameter should be set to True if the problem to be solved has a singular matrix.
 In this case, the solution is only defined to within a constant.  Setting this parameter to True
@@ -526,7 +523,7 @@ problems. To build PETSc, follow the next steps:
 
 To use PETSc, one must include ``amrex/Src/Extern/PETSc``
 in the build system.  For an example of using PETSc, we refer the
-reader to ``Tutorials/LinearSolvers/ABecLaplacian_C``.
+reader to the tutorial, `ABecLaplacian`_.
 
 MAC Projection
 =========================
@@ -568,9 +565,11 @@ are assumed to be homogeneous.  The call to the :cpp:`MLLinOp` member function
 :cpp:`setLevelBC` occurs inside the MacProjection class; one does not need to call that
 explicitly when using the MacProjection class.
 
-The code below is taken from
-``Tutorials/LinearSolvers/MAC_Projection_EB/main.cpp`` and demonstrates how to set up
+The code below is taken from the file
+``Tutorials/LinearSolvers/MAC_Projection_EB/main.cpp`` in `MAC Projection EB`_ and demonstrates how to set up
 the MACProjector object and use it to perform a MAC projection.
+
+.. _`MAC Projection EB`: https://amrex-codes.github.io/amrex/tutorials_html/LinearSolvers_Tutorial.html
 
 .. highlight:: c++
 
@@ -650,7 +649,7 @@ the MACProjector object and use it to perform a MAC projection.
     // If we want to use phi elsewhere, we can pass in an array in which to return the solution
     // macproj.project({&phi_inout},reltol,abstol,MLMG::Location::FaceCenter);
 
-See ``Tutorials/LinearSolvers/MAC_Projection_EB`` for the complete working example.
+See the `MAC Projection EB`_ tutorial for the complete working example.
 
 Nodal Projection
 ================
@@ -827,7 +826,7 @@ gradient term to make the vector field result satisfy the divergence constraint.
    //
    MultiFab::Add( *vel, *fluxes, 0, 0, AMREX_SPACEDIM, 0);
 
-See ``Tutorials/LinearSolvers/Nodal_Projection_EB`` for the complete working example.
+See the `Nodal Projection EB`_ tutorial for the complete working example.
 
 Tensor Solve
 ============

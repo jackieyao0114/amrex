@@ -163,19 +163,19 @@ AmrLevel::writePlotFile (const std::string& dir,
         }
     }
 
+    int num_derive = 0;
     std::vector<std::string> derive_names;
     const std::list<DeriveRec>& dlist = derive_lst.dlist();
-    for (std::list<DeriveRec>::const_iterator it = dlist.begin();
-         it != dlist.end();
-         ++it)
+    for (auto const& d : dlist)
     {
-        if (parent->isDerivePlotVar(it->name()))
+        if (parent->isDerivePlotVar(d.name()))
         {
-            derive_names.push_back(it->name());
+            derive_names.push_back(d.name());
+            num_derive += d.numDerive();
         }
     }
 
-    int n_data_items = plot_var_map.size() + derive_names.size();
+    int n_data_items = plot_var_map.size() + num_derive;
 
 #ifdef AMREX_USE_EB
     if (EB2::TopIndexSpaceIfPresent()) {
@@ -211,7 +211,10 @@ AmrLevel::writePlotFile (const std::string& dir,
 
         // derived
         for (auto const& dname : derive_names) {
-            os << derive_lst.get(dname)->variableName(0) << '\n';
+            const DeriveRec* rec = derive_lst.get(dname);
+            for (i = 0; i < rec->numDerive(); ++i) {
+                os << rec->variableName(i) << '\n';
+            }
         }
 
 #ifdef AMREX_USE_EB
@@ -337,7 +340,7 @@ AmrLevel::writePlotFile (const std::string& dir,
         for (auto const& dname : derive_names)
         {
             derive(dname, cur_time, plotMF, cnt);
-            cnt++;
+            cnt += derive_lst.get(dname)->numDerive();
         }
     }
 
@@ -1063,10 +1066,8 @@ FillPatchIterator::Initialize (int  boxGrow,
                                                   NComp,
                                                   desc.interp(SComp));
 
-#if defined(AMREX_CRSEGRNDOMP) || (!defined(AMREX_XSDK) && defined(CRSEGRNDOMP))
 #ifdef AMREX_USE_OMP
 #pragma omp parallel
-#endif
 #endif
                 for (MFIter mfi(m_fabs); mfi.isValid(); ++mfi)
                 {
@@ -1494,11 +1495,13 @@ FillPatchIteratorHelper::fill (FArrayBox& fab,
                                          dcomp,
                                          m_scomp,
                                          m_ncomp);
+        Gpu::synchronize();  // In case this runs on GPU
     }
 
     if (m_FixUpCorners)
     {
         FixUpPhysCorners(fab,m_amrlevel,m_index,m_time,m_scomp,dcomp,m_ncomp);
+        Gpu::synchronize();  // In case this runs on GPU
     }
 }
 
@@ -1659,7 +1662,6 @@ AmrLevel::derive (const std::string& name, Real time, int ngrow)
         }
         else
         {
-#if defined(AMREX_CRSEGRNDOMP) || (!defined(AMREX_XSDK) && defined(CRSEGRNDOMP))
 #ifdef AMREX_USE_OMP
 #pragma omp parallel
 #endif
@@ -1704,46 +1706,6 @@ AmrLevel::derive (const std::string& name, Real time, int ngrow)
                amrex::Error("AmrLevel::derive: no function available");
             }
         }
-#else
-        for (MFIter mfi(srcMF); mfi.isValid(); ++mfi)
-        {
-            int         grid_no = mfi.index();
-            const RealBox gridloc(grids[grid_no],geom.CellSize(),geom.ProbLo());
-            Real*       ddat    = (*mf)[mfi].dataPtr();
-            const int*  dlo     = (*mf)[mfi].loVect();
-            const int*  dhi     = (*mf)[mfi].hiVect();
-            int         n_der   = rec->numDerive();
-            Real*       cdat    = srcMF[mfi].dataPtr();
-            const int*  clo     = srcMF[mfi].loVect();
-            const int*  chi     = srcMF[mfi].hiVect();
-            int         n_state = rec->numState();
-            const int*  dom_lo  = state[index].getDomain().loVect();
-            const int*  dom_hi  = state[index].getDomain().hiVect();
-            const Real* dx      = geom.CellSize();
-            const int*  bcr     = rec->getBC();
-            const Real* xlo     = gridloc.lo();
-            Real        dt      = parent->dtLevel(level);
-
-            if (rec->derFunc() != static_cast<DeriveFunc>(0)){
-               rec->derFunc()(ddat,AMREX_ARLIM(dlo),AMREX_ARLIM(dhi),&n_der,
-               cdat,AMREX_ARLIM(clo),AMREX_ARLIM(chi),&n_state,
-               dlo,dhi,dom_lo,dom_hi,dx,xlo,&time,&dt,bcr,
-               &level,&grid_no);
-            } else if (rec->derFunc3D() != static_cast<DeriveFunc3D>(0)){
-               const int *bc3D = rec->getBC3D();
-               rec->derFunc3D()(ddat,AMREX_ARLIM_3D(dlo),AMREX_ARLIM_3D(dhi),&n_der,
-                                cdat,AMREX_ARLIM_3D(clo),AMREX_ARLIM_3D(chi),&n_state,
-                                AMREX_ARLIM_3D(dlo),AMREX_ARLIM_3D(dhi),
-                                AMREX_ARLIM_3D(dom_lo),AMREX_ARLIM_3D(dom_hi),
-                                AMREX_ZFILL(dx),AMREX_ZFILL(xlo),
-                                &time,&dt,
-                                bc3D,
-                                &level,&grid_no);
-            } else {
-               amrex::Error("AmrLevel::derive: no function available");
-            }
-        }
-#endif
         }
     }
     else
@@ -1811,7 +1773,6 @@ AmrLevel::derive (const std::string& name, Real time, MultiFab& mf, int dcomp)
         }
         else
         {
-#if defined(AMREX_CRSEGRNDOMP) || (!defined(AMREX_XSDK) && defined(CRSEGRNDOMP))
 #ifdef AMREX_USE_OMP
 #pragma omp parallel
 #endif
@@ -1856,46 +1817,6 @@ AmrLevel::derive (const std::string& name, Real time, MultiFab& mf, int dcomp)
                amrex::Error("AmrLevel::derive: no function available");
             }
         }
-#else
-        for (MFIter mfi(srcMF); mfi.isValid(); ++mfi)
-        {
-            int         idx     = mfi.index();
-            Real*       ddat    = mf[mfi].dataPtr(dcomp);
-            const int*  dlo     = mf[mfi].loVect();
-            const int*  dhi     = mf[mfi].hiVect();
-            int         n_der   = rec->numDerive();
-            Real*       cdat    = srcMF[mfi].dataPtr();
-            const int*  clo     = srcMF[mfi].loVect();
-            const int*  chi     = srcMF[mfi].hiVect();
-            int         n_state = rec->numState();
-            const int*  dom_lo  = state[index].getDomain().loVect();
-            const int*  dom_hi  = state[index].getDomain().hiVect();
-            const Real* dx      = geom.CellSize();
-            const int*  bcr     = rec->getBC();
-            const RealBox& temp = RealBox(mf[mfi].box(),geom.CellSize(),geom.ProbLo());
-            const Real* xlo     = temp.lo();
-            Real        dt      = parent->dtLevel(level);
-
-            if (rec->derFunc() != static_cast<DeriveFunc>(0)){
-               rec->derFunc()(ddat,AMREX_ARLIM(dlo),AMREX_ARLIM(dhi),&n_der,
-                              cdat,AMREX_ARLIM(clo),AMREX_ARLIM(chi),&n_state,
-                              dlo,dhi,dom_lo,dom_hi,dx,xlo,&time,&dt,bcr,
-                              &level,&idx);
-            } else if (rec->derFunc3D() != static_cast<DeriveFunc3D>(0)){
-               const int *bc3D = rec->getBC3D();
-               rec->derFunc3D()(ddat,AMREX_ARLIM_3D(dlo),AMREX_ARLIM_3D(dhi),&n_der,
-                                cdat,AMREX_ARLIM_3D(clo),AMREX_ARLIM_3D(chi),&n_state,
-                                AMREX_ARLIM_3D(dlo),AMREX_ARLIM_3D(dhi),
-                                AMREX_ARLIM_3D(dom_lo),AMREX_ARLIM_3D(dom_hi),
-                                AMREX_ZFILL(dx),AMREX_ZFILL(xlo),
-                                &time,&dt,
-                                bc3D,
-                                &level,&idx);
-            } else {
-               amrex::Error("AmrLevel::derive: no function available");
-            }
-        }
-#endif
         }
     }
     else

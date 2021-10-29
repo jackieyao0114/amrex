@@ -226,29 +226,91 @@ MLNodeLaplacian::buildStencil ()
         }
     }
 
-    // This is only needed at the bottom.
-    m_s0_norm0[0].back() = m_stencil[0].back()->norm0(0,0) * m_normalization_threshold;
-
 #ifdef AMREX_USE_EB
     for (int amrlev = 0; amrlev < m_num_amr_levels; ++amrlev) {
         for (int mglev = 0; mglev < m_num_mg_levels[amrlev]; ++mglev) {
+#ifdef AMREX_USE_GPU
+            if (Gpu::inLaunchRegion() && m_stencil[amrlev][mglev]->isFusingCandidate()) {
+                auto const& stma = m_stencil[amrlev][mglev]->const_arrays();
+                auto const& dmskma = m_dirichlet_mask[amrlev][mglev]->arrays();
+                ParallelFor(*m_stencil[amrlev][mglev],
+                [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k) noexcept
+                {
+                    if (stma[box_no](i,j,k,0) == Real(0.0)) {
+                        dmskma[box_no](i,j,k) = 1;
+                    }
+                });
+                // We only need to sync once at the end of this function.
+            } else
+#endif
+            {
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
-            for (MFIter mfi(*m_stencil[amrlev][mglev],TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                Box const& bx = mfi.tilebox();
-                Array4<Real const> const& starr = m_stencil[amrlev][mglev]->const_array(mfi);
-                Array4<int> const& dmskarr = m_dirichlet_mask[amrlev][mglev]->array(mfi);
-                AMREX_HOST_DEVICE_PARALLEL_FOR_3D_FUSIBLE(bx, i, j, k,
-                {
-                    if (starr(i,j,k,0) == Real(0.0)) {
-                        dmskarr(i,j,k) = 1;
-                    }
-                });
+                for (MFIter mfi(*m_stencil[amrlev][mglev],TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                    Box const& bx = mfi.tilebox();
+                    Array4<Real const> const& starr = m_stencil[amrlev][mglev]->const_array(mfi);
+                    Array4<int> const& dmskarr = m_dirichlet_mask[amrlev][mglev]->array(mfi);
+                    AMREX_HOST_DEVICE_PARALLEL_FOR_3D(bx, i, j, k,
+                    {
+                        if (starr(i,j,k,0) == Real(0.0)) {
+                            dmskarr(i,j,k) = 1;
+                        }
+                    });
+                }
             }
         }
     }
 #endif
+
+#ifdef AMREX_USE_EB
+    int max_eb_level = 0;
+    for (int mglev = m_num_mg_levels[0]-1; mglev > 0; --mglev) {
+        int mlo = m_dirichlet_mask[0][mglev]->min(0);
+        if (!mlo) {
+            // This level is good because not every nodes are Dirichlet.
+            max_eb_level = mglev;
+            break;
+        }
+    }
+    if (max_eb_level+1 < m_num_mg_levels[0]) {
+        resizeMultiGrid(max_eb_level+1);
+    }
+#endif
+
+    {
+        int amrlev = 0;
+        int mglev = m_num_mg_levels[amrlev]-1;
+        auto const& dotmasks = m_bottom_dot_mask.arrays();
+        auto const& dirmasks = m_dirichlet_mask[amrlev][mglev]->const_arrays();
+        amrex::ParallelFor(m_bottom_dot_mask,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k) noexcept
+        {
+            if (dirmasks[box_no](i,j,k)) {
+                dotmasks[box_no](i,j,k) = Real(0.);
+            }
+        });
+    }
+
+    if (m_is_bottom_singular)
+    {
+        int amrlev = 0;
+        int mglev = 0;
+        auto const& dotmasks = m_coarse_dot_mask.arrays();
+        auto const& dirmasks = m_dirichlet_mask[amrlev][mglev]->const_arrays();
+        amrex::ParallelFor(m_coarse_dot_mask,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k) noexcept
+        {
+            if (dirmasks[box_no](i,j,k)) {
+                dotmasks[box_no](i,j,k) = Real(0.);
+            }
+        });
+    }
+
+    Gpu::synchronize();
+
+    // This is only needed at the bottom.
+    m_s0_norm0[0].back() = m_stencil[0].back()->norm0(0,0) * m_normalization_threshold;
 }
 
 }
