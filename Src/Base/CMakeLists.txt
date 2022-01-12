@@ -50,6 +50,7 @@ target_sources( amrex
    AMReX_ForkJoin.cpp
    AMReX_ParallelContext.H
    AMReX_ParallelContext.cpp
+   AMReX_VisMFBuffer.H
    AMReX_VisMF.H
    AMReX_VisMF.cpp
    AMReX_AsyncOut.H
@@ -162,9 +163,10 @@ target_sources( amrex
    AMReX_BC_TYPES.H
    AMReX_FilCC_${AMReX_SPACEDIM}D_C.H
    AMReX_FilCC_C.H
+   AMReX_FilCC_C.cpp
    AMReX_FilFC_${AMReX_SPACEDIM}D_C.H
    AMReX_FilFC_C.H
-   AMReX_FilCC_C.cpp
+   AMReX_FilFC_C.cpp
    AMReX_FilND_C.H
    AMReX_FilND_C.cpp
    # Non-Local BC
