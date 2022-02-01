@@ -78,7 +78,12 @@ endif ()
 # SUNDIALS
 #
 if (AMReX_SUNDIALS)
-    find_package(SUNDIALS 5.7.0 REQUIRED)
+    if (SUNDIALS_FOUND)
+        message(STATUS "SUNDIALS_FOUND is true, assuming nvecserial or gpu-specific vector found for version 6.0.0 or higher")
+    else ()
+       set(SUNDIALS_MINIMUM_VERSION 6.0.0 CACHE INTERNAL "Minimum required SUNDIALS version")
+       find_package(SUNDIALS ${SUNDIALS_MINIMUM_VERSION} CONFIG QUIET )
+    endif ()
     if (AMReX_GPU_BACKEND STREQUAL "CUDA")
        target_link_libraries( amrex PUBLIC SUNDIALS::nveccuda)
     elseif (AMReX_GPU_BACKEND STREQUAL "HIP")

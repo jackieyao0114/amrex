@@ -295,35 +295,48 @@ run with:
 Setting Parameter Values Inside Functions
 -----------------------------------------
 
-Sometimes an application code may want to set a default that differs from the
-default in AMReX.  In this case, it is often convenient to define a function that
-sets the variable(s), and pass the name of that function to :cpp:`amrex::Initialize`.
-As an example, we may define :cpp:`add_par` to set :cpp:`extend_domain_face`
-to false if it hasn't already been set in the inputs file.
+An application code may want to set values or defaults that differ from the
+those in AMReX in a function. This is accomplished in two steps:
 
-.. highlight:: c++
+- First, define a function that sets the variable(s).
 
-::
+- Second, pass the name of that function to :cpp:`amrex::Initialize`.
 
-    void add_par () {
-       ParmParse pp("eb2");
-       if(not pp.contains("extend_domain_face")) {
-          pp.add("extend_domain_face",false);
-       }
-    };
+The example function below sets variable values using two different
+approaches to highlight subtle differences in implementation:
 
-Then we would pass :cpp:`add_par` into :cpp:`amrex::Initialize`:
+.. code-block:: cpp
 
-.. highlight:: c++
+   void add_par () {
+      ParmParse pp("eb2");
 
-::
+      // `variable_one` can be overridden by an inputs file and/or command line argument.
+      if(not pp.contains("variable_one")) {
+         pp.add("variable_one",false);
+      }
 
-    amrex::Initialize(argc, argv, true, MPI_COMM_WORLD, add_par);
+      // The inputs file or command line arguments for `variable_two` are ignored.
+      pp.add("variable_two",false);
+   };
 
-.. note::
+First this function, :cpp:`add_par`, declares a ``ParmParse`` object that will be
+used to set variables. In the next section of code, we check if the value for
+``variable_one`` has already been set elsewhere before writing to it. This
+approach prevents the function
+from overriding a value set in the inputs file or at the command line.
+In the next section, we write a value to ``variable_two`` without a conditional
+statement. In this case, we will ignore values for ``variable_two`` set in the
+inputs file or as a command line argument ---effectively overriding them with
+the value set here in the function.
 
-   Although this value replaces the current default value of true in AMReX itself, it
-   will still be over-written by setting a value in the inputs file.
+In the second step, we pass the name of the function we defined to ``amrex::Initialize``.
+In the example above the function was called ``add_par``, and therefore we write,
+
+.. code-block:: cpp
+
+   amrex::Initialize(argc, argv, true, MPI_COMM_WORLD, add_par);
+
+Now AMReX will use the user defined function to appropriately set the desired values.
 
 .. _sec:basics:parmparse:sharingCL:
 
@@ -895,14 +908,18 @@ space domain, a :cpp:`RealBox` specifying the
 physical domain, an :cpp:`int` specifying coordinate system type, and
 an :cpp:`int` pointer or array specifying periodicity. If a :cpp:`RealBox` is not
 given in the first constructor, AMReX  will construct one based on :cpp:`ParmParse` parameters,
-``geometry.prob_lo`` and ``geometry.prob_hi``, where each of the parameter is
-an array of ``AMREX_SPACEDIM`` real numbers. It's a runtime error if this
-fails. The argument for coordinate system is an integer type with
+``geometry.prob_lo`` / ``geometry.prob_hi`` / ``geometry.prob_extent``,
+where each of the parameter is an array of ``AMREX_SPACEDIM`` real numbers.
+See the section on :ref:`sec:inputs:pd` for more details about how to specify these.
+
+The argument for coordinate system is an integer type with
 valid values being 0 (Cartesian), or 1 (cylindrical), or 2 (spherical). If it
 is invalid as in the case of the default argument value of the first constructor, AMReX will query the
 :cpp:`ParmParse` database for ``geometry.coord_sys`` and use it if one is
 found. If it cannot find the parameter, the coordinate system is set to 0
-(i.e., Cartesian coordinates). The :cpp:`Geometry` class has the concept of
+(i.e., Cartesian coordinates).
+
+The :cpp:`Geometry` class has the concept of
 periodicity.  An argument can be passed specifying periodicity in each
 dimension. If it is not given in the first constructor, the domain is assumed to be non-periodic unless
 there is the :cpp:`ParmParse` integer array parameter ``geometry.is_periodic``
@@ -2681,13 +2698,11 @@ want AMReX to handle this, ``ParmParse`` parameter
 
 
 
-.. _sec:basics:heat1:
+Example Codes
+=============
 
-Tutorials
-=========
-
-To assist users we have multiple tutorials introducing AMReX functionality.
+To assist users we have multiple example codes introducing AMReX functionality.
 They range from HelloWorld walk-thrus to stand-alone examples of complex
-features in practice. To access the available tutorials, please see
+features in practice. To access the available examples, please see
 `AMReX Guided Tutorials and Example Codes
 <https://amrex-codes.github.io/amrex/tutorials_html/>`_.
