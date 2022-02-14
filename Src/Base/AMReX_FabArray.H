@@ -324,7 +324,15 @@ public:
 
     //
     //! Constructs an empty FabArray<FAB>.
-    FabArray ();
+    FabArray () noexcept;
+
+    /**
+     * \brief Construct an empty FabArray<FAB> that has a default Arena.  If
+     * `define` is called later with a nulltpr as MFInfo's arena, the
+     * default Arena `a` will be used.  If the arena in MFInfo is not a
+     * nullptr, the MFInfo's arena will be used.
+     */
+    explicit FabArray (Arena* a) noexcept;
 
     /**
     * \brief Construct a FabArray<FAB> with a valid region defined by bxs
@@ -850,50 +858,21 @@ public:
                        int                  num_comp,
                        const IntVect&       nghost);
 
-    //
-    // In the following copyTo functions, the destination FAB is identical on each process!!
-    //
-
-    /**
-    * brief Copy the values contained in the intersection of the
-    * valid + nghost region of this FabArray with the FAB dest into dest.
-    */
-    void copyTo (FAB& dest,
-                 int  nghost = 0) const;
-
     /**
     * \brief Copy the values contained in the intersection of the
-    * valid + nghost region of this FabArray with the FAB dest and the Box
-    * subbox into that subregion of dest.
+    * valid + nghost region of this FabArray with the FAB dest into dest.
+    * Note that FAB dest is assumed to be identical on each process.
     */
-    void copyTo (FAB&       dest,
-                 const Box& subbox,
-                 int        nghost = 0) const;
+    void copyTo (FAB& dest, int  nghost = 0) const;
 
     /**
     * \brief Copy the values contained in the intersection of the
     * num_comp component valid + nghost region of this FabArray, starting at
     * component src_comp, with the FAB dest into dest, starting at
     * component dest_comp in dest.
+    * Note that FAB dest is assumed to be identical on each process.
     */
-    void copyTo (FAB& dest,
-                 int  src_comp,
-                 int  dest_comp,
-                 int  num_comp,
-                 int  nghost = 0) const;
-
-    /**
-    * \brief Copy the values contained in the intersection of the
-    * num_comp component valid + nghost region of this FabArray, starting at
-    * component src_comp, with the FAB dest and the Box subbox, into
-    * dest, starting at component dest_comp in dest.
-    */
-    void copyTo (FAB&       dest,
-                 const Box& subbox,
-                 int        src_comp,
-                 int        dest_comp,
-                 int        num_comp,
-                 int        nghost = 0) const;
+    void copyTo (FAB& dest, int  src_comp, int  dest_comp, int  num_comp, int  nghost = 0) const;
 
     //! Shift the boxarray by vector v
     void shift (const IntVect& v);
@@ -1551,8 +1530,16 @@ FabArray<FAB>::setVal (value_type val, const Box& region, const IntVect& nghost)
 }
 
 template <class FAB>
-FabArray<FAB>::FabArray ()
+FabArray<FAB>::FabArray () noexcept
     : shmem()
+{
+    m_FA_stats.recordBuild();
+}
+
+template <class FAB>
+FabArray<FAB>::FabArray (Arena* a) noexcept
+    : m_dallocator(a),
+      shmem()
 {
     m_FA_stats.recordBuild();
 }
@@ -1714,10 +1701,11 @@ FabArray<FAB>::define (const BoxArray&            bxs,
 {
     std::unique_ptr<FabFactory<FAB> > factory(a_factory.clone());
 
+    auto default_arena = m_dallocator.m_arena;
     clear();
 
     m_factory = std::move(factory);
-    m_dallocator.m_arena = info.arena;
+    m_dallocator.m_arena = info.arena ? info.arena : default_arena;
 
     define_function_called = true;
 
@@ -1728,7 +1716,7 @@ FabArray<FAB>::define (const BoxArray&            bxs,
     addThisBD();
 
     if(info.alloc) {
-        AllocFabs(*m_factory, info.arena, info.tags);
+        AllocFabs(*m_factory, m_dallocator.m_arena, info.tags);
         Gpu::synchronize();
 #ifdef BL_USE_TEAM
         ParallelDescriptor::MyTeam().MemoryBarrier();
@@ -2093,36 +2081,11 @@ FabArray<FAB>::setDomainBndry (value_type val,
     }
 }
 
-//
-// Copies to FABs, note that destination is first arg.
-//
-
 template <class FAB>
 void
-FabArray<FAB>::copyTo (FAB& dest,
-                       int  nghost) const
+FabArray<FAB>::copyTo (FAB& dest, int  nghost) const
 {
-    copyTo(dest, dest.box(), 0, 0, dest.nComp(), nghost);
-}
-
-template <class FAB>
-void
-FabArray<FAB>::copyTo (FAB&       dest,
-                       const Box& subbox,
-                       int        nghost) const
-{
-    copyTo(dest, subbox, 0, 0, dest.nComp(), nghost);
-}
-
-template <class FAB>
-void
-FabArray<FAB>::copyTo (FAB& dest,
-                       int  scomp,
-                       int  dcomp,
-                       int  ncomp,
-                       int  nghost) const
-{
-    copyTo(dest, dest.box(), scomp, dcomp, ncomp, nghost);
+    copyTo(dest, 0, 0, dest.nComp(), nghost);
 }
 
 template <class FAB>

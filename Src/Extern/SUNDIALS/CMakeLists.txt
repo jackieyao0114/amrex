@@ -10,5 +10,5 @@ target_sources( amrex
    AMReX_NVector_MultiFab.H
    AMReX_SUNMemory.cpp
    AMReX_SUNMemory.H
-   AMReX_SUNProfiler.H
+   AMReX_SundialsIntegrator.H
    )
