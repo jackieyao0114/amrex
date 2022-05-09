@@ -214,6 +214,60 @@ FillPatchInterp (MF& mf_fine_patch, int fcomp, MF const& mf_crse_patch, int ccom
     }
 }
 
+template <typename MF, typename iMF, typename Interp>
+std::enable_if_t<IsFabArray<MF>::value  && !std::is_same<Interp,MFInterpolater>::value>
+InterpFace (Interp *interp,
+            MF const& mf_crse_patch,    const int crse_comp,
+            MF&       mf_refined_patch, const int fine_comp,
+            int ncomp, const IntVect&   ratio,
+            const iMF& solve_mask, const Geometry&  crse_geom, const Geometry&  fine_geom,
+            int bcscomp, RunOn gpu_or_cpu,
+            const Vector<BCRec>& bcs)
+{
+    Vector<BCRec> bcr(ncomp);
+    Box const& cdomain = amrex::convert(crse_geom.Domain(), mf_crse_patch.ixType());
+    for (MFIter mfi(mf_refined_patch);mfi.isValid(); ++mfi)
+    {
+        auto& sfab = mf_crse_patch[mfi];
+        const Box& sbx = sfab.box();
+        auto& dfab = mf_refined_patch[mfi];
+        Box const& dbx = dfab.box();
+        auto& ifab = solve_mask[mfi];
+        amrex::setBC(sbx,cdomain,bcscomp,0,ncomp,bcs,bcr);
+        interp->interp_face(sfab,crse_comp,dfab,fine_comp,ncomp,
+                            dbx, ratio, ifab, crse_geom, fine_geom,
+                            bcr, bcscomp, gpu_or_cpu);
+    }
+}
+
+template <typename MF, typename iMF>
+std::enable_if_t<IsFabArray<MF>::value>
+InterpFace (InterpBase *interp,
+            MF const& mf_crse_patch,    const int crse_comp,
+            MF&       mf_refined_patch, const int fine_comp,
+            int ncomp, const IntVect&   ratio,
+            const iMF& solve_mask, const Geometry&  crse_geom, const Geometry&  fine_geom,
+            int bccomp, RunOn gpu_or_cpu,
+            const Vector<BCRec>& bcs)
+{
+    if (dynamic_cast<MFInterpolater*>(interp)){
+        InterpFace(static_cast<MFInterpolater*>(interp),
+                    mf_crse_patch, crse_comp,mf_refined_patch, fine_comp,
+                    ncomp, ratio, solve_mask, crse_geom, fine_geom, bccomp,
+                    gpu_or_cpu, bcs);
+    }
+    else if (dynamic_cast<Interpolater*>(interp)){
+        InterpFace(static_cast<Interpolater*>(interp),
+                    mf_crse_patch, crse_comp,mf_refined_patch, fine_comp,
+                    ncomp, ratio, solve_mask, crse_geom, fine_geom, bccomp,
+                    gpu_or_cpu, bcs);
+    }
+    else {
+        amrex::Abort("InterpFace: unknown InterpBase");
+    }
+}
+
+
 namespace {
 
 // ======== FArrayBox
@@ -381,48 +435,136 @@ namespace {
         {
             const InterpolaterBoxCoarsener& coarsener = mapper->BoxCoarsener(ratio);
 
-            const FabArrayBase::FPinfo& fpc = FabArrayBase::TheFPinfo(*fmf[0], mf,
-                                                                      nghost,
-                                                                      coarsener,
-                                                                      fgeom,
-                                                                      cgeom,
-                                                                      index_space);
-
-            if ( ! fpc.ba_crse_patch.empty())
+            // Test for Face-centered data
+            if ( AMREX_D_TERM(  mf.ixType().nodeCentered(0),
+                              + mf.ixType().nodeCentered(1),
+                              + mf.ixType().nodeCentered(2) ) == 1 )
             {
-                MF mf_crse_patch = make_mf_crse_patch<MF>(fpc, ncomp);
-                mf_set_domain_bndry (mf_crse_patch, cgeom);
+                if ( !dynamic_cast<Interpolater*>(mapper) ){
+                    amrex::Abort("This interpolater has not yet implemented a version for face-based data");
+                }
 
-                FillPatchSingleLevel(mf_crse_patch, time, cmf, ct, scomp, 0, ncomp, cgeom, cbc, cbccomp);
+                // Convert to cell-centered MF meta-data for FPInfo.
+                MF mf_cc_dummy( amrex::convert(mf.boxArray(), IntVect::TheZeroVector()),
+                                mf.DistributionMap(), ncomp, nghost, MFInfo().SetAlloc(false) );
+                MF fmf_cc_dummy( amrex::convert(fmf[0]->boxArray(), IntVect::TheZeroVector()),
+                                 fmf[0]->DistributionMap(), ncomp, nghost, MFInfo().SetAlloc(false) );
 
-                MF mf_fine_patch = make_mf_fine_patch<MF>(fpc, ncomp);
+                const FabArrayBase::FPinfo& fpc = FabArrayBase::TheFPinfo(fmf_cc_dummy, mf_cc_dummy,
+                                                                          nghost,
+                                                                          coarsener,
+                                                                          fgeom,
+                                                                          cgeom,
+                                                                          index_space);
+
+                if ( ! fpc.ba_crse_patch.empty())
+                {
+
+                    using FAB = typename MF::FABType::value_type;
+
+                    MF mf_crse_patch     = make_mf_crse_patch<MF>      (fpc, ncomp, mf.boxArray().ixType());
+                    // Must make sure fine exists under needed coarse faces.
+                    // It stores values for the final (interior) interpolation,
+                    // which is done from this fine MF that's been partially filled
+                    // (with only faces overlying coarse having valid data).
+                    MF mf_refined_patch  = make_mf_refined_patch<MF>   (fpc, ncomp, mf.boxArray().ixType(), ratio);
+                    iMultiFab solve_mask = make_mf_crse_mask<iMultiFab>(fpc, ncomp, mf.boxArray().ixType(), ratio);
+
+                    mf_set_domain_bndry(mf_crse_patch, cgeom);
+                    FillPatchSingleLevel(mf_crse_patch, time, cmf, ct, scomp, 0, ncomp,
+                                         cgeom, cbc, cbccomp);
+
+                    mf_set_domain_bndry(mf_refined_patch, fgeom);
+                    FillPatchSingleLevel(mf_refined_patch, time, fmf, ft, scomp, 0, ncomp,
+                                         fgeom, fbc, fbccomp);
+
+                    // Aliased MFs, used to allow CPC caching.
+                    MF mf_known( amrex::coarsen(fmf[0]->boxArray(), ratio), fmf[0]->DistributionMap(),
+                                 ncomp, nghost, MFInfo().SetAlloc(false) );
+                    MF mf_solution( amrex::coarsen(mf_refined_patch.boxArray(), ratio), mf_refined_patch.DistributionMap(),
+                                    ncomp, 0, MFInfo().SetAlloc(false) );
+
+                    const FabArrayBase::CPC mask_cpc( mf_solution, IntVect::TheZeroVector(),
+                                                      mf_known, IntVect::TheZeroVector(),
+                                                      fgeom.periodicity());
+
+                    solve_mask.setVal(1);                   // Values to solve.
+                    solve_mask.setVal(0, mask_cpc, 0, 1);   // Known values.
+
+                    for (MFIter mfi(mf_refined_patch); mfi.isValid(); ++mfi)
+                    {
+                        FAB& sfab = mf_crse_patch[mfi];
+                        pre_interp(sfab, sfab.box(), 0, ncomp);
+                    }
+
+                    InterpFace(mapper, mf_crse_patch, 0, mf_refined_patch, 0, ncomp,
+                               ratio, solve_mask, cgeom, fgeom, bcscomp, RunOn::Gpu, bcs);
+
+                    for (MFIter mfi(mf_refined_patch); mfi.isValid(); ++mfi)
+                    {
+                        FAB& dfab = mf_refined_patch[mfi];
+                        post_interp(dfab, dfab.box(), 0, ncomp);
+                    }
+
+                    bool aliasing = false;
+                    for (auto const& fmf_a : fmf) {
+                        aliasing = aliasing || (&mf == fmf_a);
+                    }
+                    if (aliasing) {
+                        mf.ParallelCopyToGhost(mf_refined_patch, 0, dcomp, ncomp,
+                                               IntVect{0}, nghost);
+                    } else {
+                        mf.ParallelCopy(mf_refined_patch, 0, dcomp, ncomp,
+                                        IntVect{0}, nghost);
+                    }
+                }
+            }
+            else
+            {
+                const FabArrayBase::FPinfo& fpc = FabArrayBase::TheFPinfo(*fmf[0], mf,
+                                                                          nghost,
+                                                                          coarsener,
+                                                                          fgeom,
+                                                                          cgeom,
+                                                                          index_space);
+
+                if ( ! fpc.ba_crse_patch.empty())
+                {
+
+                    MF mf_crse_patch = make_mf_crse_patch<MF>(fpc, ncomp);
+                    mf_set_domain_bndry (mf_crse_patch, cgeom);
+
+                    FillPatchSingleLevel(mf_crse_patch, time, cmf, ct, scomp, 0, ncomp, cgeom, cbc, cbccomp);
+
+                    MF mf_fine_patch = make_mf_fine_patch<MF>(fpc, ncomp);
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
-                for (MFIter mfi(mf_crse_patch); mfi.isValid(); ++mfi)
-                {
-                    auto& sfab = mf_crse_patch[mfi];
-                    const Box& sbx = sfab.box();
-                    pre_interp(sfab, sbx, 0, ncomp);
-                }
+                    for (MFIter mfi(mf_crse_patch); mfi.isValid(); ++mfi)
+                    {
+                        auto& sfab = mf_crse_patch[mfi];
+                        const Box& sbx = sfab.box();
+                        pre_interp(sfab, sbx, 0, ncomp);
+                    }
 
-                FillPatchInterp(mf_fine_patch, 0, mf_crse_patch, 0,
-                                ncomp, IntVect(0), cgeom, fgeom,
-                                amrex::grow(amrex::convert(fgeom.Domain(),mf.ixType()),nghost),
-                                ratio, mapper, bcs, bcscomp);
+                    FillPatchInterp(mf_fine_patch, 0, mf_crse_patch, 0,
+                                    ncomp, IntVect(0), cgeom, fgeom,
+                                    amrex::grow(amrex::convert(fgeom.Domain(),mf.ixType()),nghost),
+                                    ratio, mapper, bcs, bcscomp);
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
-                for (MFIter mfi(mf_fine_patch); mfi.isValid(); ++mfi)
-                {
-                    auto& dfab = mf_fine_patch[mfi];
-                    const Box& dbx = dfab.box();
-                    post_interp(dfab, dbx, 0, ncomp);
-                }
+                    for (MFIter mfi(mf_fine_patch); mfi.isValid(); ++mfi)
+                    {
+                        auto& dfab = mf_fine_patch[mfi];
+                        const Box& dbx = dfab.box();
+                        post_interp(dfab, dbx, 0, ncomp);
+                    }
 
-                mf.ParallelCopy(mf_fine_patch, 0, dcomp, ncomp, IntVect{0}, nghost);
+                    mf.ParallelCopy(mf_fine_patch, 0, dcomp, ncomp, IntVect{0}, nghost);
+                }
             }
         }
 
@@ -565,7 +707,7 @@ namespace {
                         pre_interp(sfab, sbx_cc, 0, ncomp);
 
                         mapper->interp_arr(sfab, 0, dfab, 0, ncomp, dbx_cc, ratio, mfab,
-                                           cgeom, fgeom, bcr, dcomp, idummy, RunOn::Gpu);
+                                           cgeom, fgeom, bcr, idummy, idummy, RunOn::Gpu);
 
                         post_interp(dfab, dbx_cc, 0, ncomp);
                     }
@@ -573,7 +715,17 @@ namespace {
 
                 for (int d=0; d<AMREX_SPACEDIM; ++d)
                 {
-                    mf[d]->ParallelCopy(mf_refined_patch[d], 0, dcomp, ncomp, IntVect{0}, nghost);
+                    bool aliasing = false;
+                    for (auto const& fmf_a : fmf) {
+                        aliasing = aliasing || (mf[d] == fmf_a[d]);
+                    }
+                    if (aliasing) {
+                        mf[d]->ParallelCopyToGhost(mf_refined_patch[d], 0, dcomp, ncomp,
+                                                   IntVect{0}, nghost);
+                    } else {
+                        mf[d]->ParallelCopy(mf_refined_patch[d], 0, dcomp, ncomp,
+                                            IntVect{0}, nghost);
+                    }
                 }
             }
         }
@@ -581,7 +733,7 @@ namespace {
         for (int d=0; d<AMREX_SPACEDIM; ++d)
         {
             Vector<MF*> fmf_time;
-            for (auto ffab : fmf)
+            for (auto const& ffab : fmf)
                  { fmf_time.push_back(ffab[d]); }
 
             FillPatchSingleLevel(*mf[d], nghost, time, fmf_time, ft, scomp, dcomp, ncomp,

@@ -651,6 +651,15 @@ MultiFab::MultiFab () noexcept
 #endif
 }
 
+MultiFab::MultiFab (Arena* a) noexcept
+    : FabArray<FArrayBox>(a)
+{
+#ifdef AMREX_MEM_PROFILING
+    ++num_multifabs;
+    num_multifabs_hwm = std::max(num_multifabs_hwm, num_multifabs);
+#endif
+}
+
 MultiFab::MultiFab (const BoxArray&            bxs,
                     const DistributionMapping& dm,
                     int                        ncomp,
@@ -1774,37 +1783,9 @@ MultiFab::WeightedSync (const MultiFab& wgt, const Periodicity& period)
 }
 
 void
-MultiFab::OverrideSync (const Periodicity& period)
-{
-    if (ixType().cellCentered()) return;
-    auto msk = this->OwnerMask(period);
-    amrex::OverrideSync(*this, *msk, period);
-}
-
-void
 MultiFab::OverrideSync (const iMultiFab& msk, const Periodicity& period)
 {
     amrex::OverrideSync(*this, msk, period);
-}
-
-void
-MultiFab::OverrideSync_nowait (const Periodicity& period)
-{
-    if (ixType().cellCentered()) return;
-    auto msk = this->OwnerMask(period);
-    amrex::OverrideSync_nowait(*this, *msk, period);
-}
-
-void
-MultiFab::OverrideSync_nowait (const iMultiFab& msk, const Periodicity& period)
-{
-    amrex::OverrideSync_nowait(*this, msk, period);
-}
-
-void
-MultiFab::OverrideSync_finish ()
-{
-    amrex::OverrideSync_finish(*this);
 }
 
 }

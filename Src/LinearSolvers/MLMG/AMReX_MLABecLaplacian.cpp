@@ -87,6 +87,13 @@ MLABecLaplacian::define_ab_coeffs ()
 MLABecLaplacian::~MLABecLaplacian ()
 {}
 
+/**
+ * Set scalar constants A and B in the equation:
+ * (A \alpha - B \nabla \cdot \beta \nabla ) \phi = f
+ * for the Multi-Level AB Laplacian Solver.
+ *
+ */
+
 void
 MLABecLaplacian::setScalars (Real a, Real b) noexcept
 {
@@ -101,6 +108,16 @@ MLABecLaplacian::setScalars (Real a, Real b) noexcept
     }
 }
 
+/**
+ * Sets alpha as a scalar field to values from a single component
+ * mutlifab.
+ *
+ * \param [in] amrlev The level of the multifab for the solver, with
+ *                    \p amrlev = 0 always being the lowest level in the
+ *                    AMR hierarchy represented in the solve.
+ * \param [in] alpha  Multifab of alpha values.
+ */
+
 void
 MLABecLaplacian::setACoeffs (int amrlev, const MultiFab& alpha)
 {
@@ -110,12 +127,32 @@ MLABecLaplacian::setACoeffs (int amrlev, const MultiFab& alpha)
     m_needs_update = true;
 }
 
+/**
+ * Sets alpha as a single scalar constant value across
+ * the mutlifab.
+ *
+ * \param [in] amrlev The level of the multifab for the solver, with
+ *                    \p amrlev = 0 always being the lowest level in the
+ *                    AMR hierarchy represented in the solve.
+ * \param [in] alpha  Single scalar value to populate across mutlifab.
+ */
+
 void
 MLABecLaplacian::setACoeffs (int amrlev, Real alpha)
 {
     m_a_coeffs[amrlev][0].setVal(alpha);
     m_needs_update = true;
 }
+
+/**
+ * Sets beta as a scalar field to be the values defined
+ * in the supplied multifabs (one for each space dimension).
+ *
+ * \param [in] amrlev The level of the multifab for the solver, with
+ *                    \p amrlev = 0 always being the lowest level in the
+ *                    AMR hierarchy represented in the solve.
+ * \param [in] beta   Array of Multifabs of beta values.
+ */
 
 void
 MLABecLaplacian::setBCoeffs (int amrlev,
@@ -138,6 +175,16 @@ MLABecLaplacian::setBCoeffs (int amrlev,
     m_needs_update = true;
 }
 
+/**
+ * Sets beta as a single scalar constant value across
+ * the mutlifabs (one for each dimension).
+ *
+ * \param [in] amrlev The level of the multifab for the solver, with
+ *                    \p amrlev = 0 always being the lowest level in the
+ *                    AMR hierarchy represented in the solve.
+ * \param [in] beta   Single scalar value to populate across mutlifabs.
+ */
+
 void
 MLABecLaplacian::setBCoeffs (int amrlev, Real beta)
 {
@@ -146,6 +193,16 @@ MLABecLaplacian::setBCoeffs (int amrlev, Real beta)
     }
     m_needs_update = true;
 }
+
+/**
+ * Set each beta component to a single scalar constant value corresponding to the
+ * respective component of the supplied vector.
+ *
+ * \param [in] amrlev The level of the multifab for the solver, with
+ *                    \p amrlev = 0 always being the lowest level in the
+ *                    AMR hierarchy represented in the solve.
+ * \param [in] beta   Vector of scalar constant values.
+ */
 
 void
 MLABecLaplacian::setBCoeffs (int amrlev, Vector<Real> const& beta)
@@ -308,7 +365,11 @@ MLABecLaplacian::applyRobinBCTermsCoeffs ()
     if (!hasRobinBC()) return;
 
     const int ncomp = getNComp();
-    if (m_a_scalar == Real(0.0)) m_a_scalar = Real(1.0);
+    bool reset_alpha = false;
+    if (m_a_scalar == Real(0.0)) {
+        m_a_scalar = Real(1.0);
+        reset_alpha = true;
+    }
     const Real bovera = m_b_scalar/m_a_scalar;
 
     for (int amrlev = 0; amrlev < m_num_amr_levels; ++amrlev) {
@@ -317,6 +378,10 @@ MLABecLaplacian::applyRobinBCTermsCoeffs ()
         const Real dxi = m_geom[amrlev][mglev].InvCellSize(0);
         const Real dyi = (AMREX_SPACEDIM >= 2) ? m_geom[amrlev][mglev].InvCellSize(1) : Real(1.0);
         const Real dzi = (AMREX_SPACEDIM == 3) ? m_geom[amrlev][mglev].InvCellSize(2) : Real(1.0);
+
+        if (reset_alpha) {
+            m_a_coeffs[amrlev][mglev].setVal(0.0);
+        }
 
         MFItInfo mfi_info;
         if (Gpu::notInLaunchRegion()) mfi_info.SetDynamic(true);
@@ -414,6 +479,14 @@ MLABecLaplacian::prepareForSolve ()
 
     averageDownCoeffs();
 
+    update_singular_flags();
+
+    m_needs_update = false;
+}
+
+void
+MLABecLaplacian::update_singular_flags ()
+{
     m_is_singular.clear();
     m_is_singular.resize(m_num_amr_levels, false);
     auto itlo = std::find(m_lobc[0].begin(), m_lobc[0].end(), BCType::Dirichlet);
@@ -433,13 +506,11 @@ MLABecLaplacian::prepareForSolve ()
                 {
                     Real asum = m_a_coeffs[alev].back().sum();
                     Real amax = m_a_coeffs[alev].back().norm0();
-                    m_is_singular[alev] = (asum <= amax * 1.e-12);
+                    m_is_singular[alev] = (std::abs(asum) <= amax * 1.e-12);
                 }
             }
         }
     }
-
-    m_needs_update = false;
 }
 
 void
@@ -874,30 +945,7 @@ MLABecLaplacian::update ()
 
     averageDownCoeffs();
 
-    m_is_singular.clear();
-    m_is_singular.resize(m_num_amr_levels, false);
-    auto itlo = std::find(m_lobc[0].begin(), m_lobc[0].end(), BCType::Dirichlet);
-    auto ithi = std::find(m_hibc[0].begin(), m_hibc[0].end(), BCType::Dirichlet);
-    if (itlo == m_lobc[0].end() && ithi == m_hibc[0].end())
-    {  // No Dirichlet
-        for (int alev = 0; alev < m_num_amr_levels; ++alev)
-        {
-            // For now this assumes that overset regions are treated as Dirichlet bc's
-            if (m_domain_covered[alev] && !m_overset_mask[alev][0])
-            {
-                if (m_a_scalar == 0.0)
-                {
-                    m_is_singular[alev] = true;
-                }
-                else
-                {
-                    Real asum = m_a_coeffs[alev].back().sum();
-                    Real amax = m_a_coeffs[alev].back().norm0();
-                    m_is_singular[alev] = (asum <= amax * 1.e-12);
-                }
-            }
-        }
-    }
+    update_singular_flags();
 
     m_needs_update = false;
 }

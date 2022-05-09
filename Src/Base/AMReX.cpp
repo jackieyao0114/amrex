@@ -55,7 +55,7 @@
 #include <omp.h>
 #endif
 
-#if defined(__APPLE__) && !defined(__arm64__)
+#if defined(__APPLE__) && defined(__x86_64__)
 #include <xmmintrin.h>
 #endif
 
@@ -114,7 +114,7 @@ namespace {
 #if defined(__linux__)
     int           prev_fpe_excepts;
     int           curr_fpe_excepts;
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && defined(__x86_64__)
     unsigned int  prev_fpe_mask;
     unsigned int  curr_fpe_excepts;
 #endif
@@ -125,15 +125,6 @@ namespace {
     int init_hypre = 1;
 }
 #endif
-
-std::string amrex::Version ()
-{
-#ifdef AMREX_GIT_VERSION
-    return std::string(AMREX_GIT_VERSION);
-#else
-    return std::string("Unknown");
-#endif
-}
 
 int amrex::Verbose () noexcept { return amrex::system::verbose; }
 
@@ -427,8 +418,8 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
 
     {
         ParmParse pp("amrex");
-        pp.query("v", system::verbose);
-        pp.query("verbose", system::verbose);
+        pp.queryAdd("v", system::verbose);
+        pp.queryAdd("verbose", system::verbose);
     }
 
 #ifdef AMREX_USE_GPU
@@ -441,11 +432,11 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
 
     {
         ParmParse pp("amrex");
-        pp.query("regtest_reduction", system::regtest_reduction);
-        pp.query("signal_handling", system::signal_handling);
-        pp.query("throw_exception", system::throw_exception);
-        pp.query("call_addr2line", system::call_addr2line);
-        pp.query("abort_on_unused_inputs", system::abort_on_unused_inputs);
+        pp.queryAdd("regtest_reduction", system::regtest_reduction);
+        pp.queryAdd("signal_handling", system::signal_handling);
+        pp.queryAdd("throw_exception", system::throw_exception);
+        pp.queryAdd("call_addr2line", system::call_addr2line);
+        pp.queryAdd("abort_on_unused_inputs", system::abort_on_unused_inputs);
 
         if (system::signal_handling)
         {
@@ -455,7 +446,7 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
             prev_handler_sigabrt = signal(SIGABRT, BLBackTrace::handler);
 
             int term = 0;
-            pp.query("handle_sigterm", term);
+            pp.queryAdd("handle_sigterm", term);
             if (term) {
                 prev_handler_sigterm = signal(SIGTERM,  BLBackTrace::handler);
             } else {
@@ -465,9 +456,9 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
             prev_handler_sigfpe = SIG_ERR;
 
             int invalid = 0, divbyzero=0, overflow=0;
-            pp.query("fpe_trap_invalid", invalid);
-            pp.query("fpe_trap_zero", divbyzero);
-            pp.query("fpe_trap_overflow", overflow);
+            pp.queryAdd("fpe_trap_invalid", invalid);
+            pp.queryAdd("fpe_trap_zero", divbyzero);
+            pp.queryAdd("fpe_trap_overflow", overflow);
 
 #if defined(__linux__)
             curr_fpe_excepts = 0;
@@ -483,7 +474,7 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
             }
 #endif
 
-#elif defined(__APPLE__) && !defined(__arm64__)
+#elif defined(__APPLE__) && defined(__x86_64__)
             prev_fpe_mask = _MM_GET_EXCEPTION_MASK();
             curr_fpe_excepts = 0u;
             if (invalid)   curr_fpe_excepts |= _MM_MASK_INVALID;
@@ -497,7 +488,7 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
         }
 
 #ifdef AMREX_USE_HYPRE
-        pp.query("init_hypre", init_hypre);
+        pp.queryAdd("init_hypre", init_hypre);
 #endif
     }
 
@@ -536,14 +527,35 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
     if (init_hypre) {
         HYPRE_Init();
 #ifdef HYPRE_USING_CUDA
+
+#if defined(HYPRE_RELEASE_NUMBER) && (HYPRE_RELEASE_NUMBER >= 22100)
+
+#ifdef HYPRE_USING_DEVICE_POOL
+        /* device pool allocator */
+        hypre_uint mempool_bin_growth   = 8,
+            mempool_min_bin      = 3,
+            mempool_max_bin      = 9;
+        size_t mempool_max_cached_bytes = 2000LL * 1024 * 1024;
+
+        /* To be effective, hypre_SetCubMemPoolSize must immediately follow HYPRE_Init */
+        HYPRE_SetGPUMemoryPoolSize( mempool_bin_growth, mempool_min_bin,
+                                    mempool_max_bin, mempool_max_cached_bytes );
+#endif
+        HYPRE_SetSpGemmUseCusparse(false);
+        HYPRE_SetMemoryLocation(HYPRE_MEMORY_DEVICE);
+        HYPRE_SetExecutionPolicy(HYPRE_EXEC_DEVICE);
+        HYPRE_SetUseGpuRand(true);
+#else
         hypre_HandleDefaultExecPolicy(hypre_handle()) = HYPRE_EXEC_DEVICE;
         hypre_HandleSpgemmUseCusparse(hypre_handle()) = 0;
 #endif
+#endif
+
     }
 #endif
 
 #ifdef AMREX_USE_SUNDIALS
-    sundials::Initialize();
+    sundials::Initialize(amrex::OpenMP::get_max_threads());
 #endif
 
     if (system::verbose > 0)
@@ -573,6 +585,12 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
 
     AMReX::push(new AMReX());
     return AMReX::top();
+}
+
+bool
+amrex::Initialized ()
+{
+    return !amrex::AMReX::empty();
 }
 
 void
@@ -674,7 +692,7 @@ amrex::Finalize (amrex::AMReX* pamrex)
             feenableexcept(prev_fpe_excepts);
         }
 #endif
-#elif defined(__APPLE__) && !defined(__arm64__)
+#elif defined(__APPLE__) && defined(__x86_64__)
         if (curr_fpe_excepts != 0u) {
             _MM_SET_EXCEPTION_MASK(prev_fpe_mask);
         }

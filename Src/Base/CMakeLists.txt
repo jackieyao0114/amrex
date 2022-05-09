@@ -12,9 +12,11 @@ target_sources( amrex
    AMReX_BlockMutex.cpp
    AMReX_GpuComplex.H
    AMReX_Vector.H
+   AMReX_TableData.H
    AMReX_Tuple.H
    AMReX.cpp
    AMReX_error_fi.cpp
+   AMReX_Version.cpp
    AMReX.H
    AMReX_Exception.H
    AMReX_Extension.H
@@ -50,6 +52,7 @@ target_sources( amrex
    AMReX_ForkJoin.cpp
    AMReX_ParallelContext.H
    AMReX_ParallelContext.cpp
+   AMReX_VisMFBuffer.H
    AMReX_VisMF.H
    AMReX_VisMF.cpp
    AMReX_AsyncOut.H
@@ -64,6 +67,7 @@ target_sources( amrex
    AMReX_CArena.cpp
    AMReX_PArena.H
    AMReX_PArena.cpp
+   AMReX_DataAllocator.H
    AMReX_BLProfiler.H
    AMReX_BLBackTrace.H
    AMReX_BLFort.H
@@ -72,6 +76,7 @@ target_sources( amrex
    AMReX_parstream.H
    AMReX_parstream.cpp
    # I/O stuff  --------------------------------------------------------------
+   AMReX_ANSIEscCode.H
    AMReX_FabConv.H
    AMReX_FabConv.cpp
    AMReX_FPC.H
@@ -161,9 +166,10 @@ target_sources( amrex
    AMReX_BC_TYPES.H
    AMReX_FilCC_${AMReX_SPACEDIM}D_C.H
    AMReX_FilCC_C.H
+   AMReX_FilCC_C.cpp
    AMReX_FilFC_${AMReX_SPACEDIM}D_C.H
    AMReX_FilFC_C.H
-   AMReX_FilCC_C.cpp
+   AMReX_FilFC_C.cpp
    AMReX_FilND_C.H
    AMReX_FilND_C.cpp
    # Non-Local BC
@@ -175,6 +181,11 @@ target_sources( amrex
    AMReX_PlotFileUtil.H
    AMReX_PlotFileDataImpl.H
    AMReX_PlotFileDataImpl.cpp
+   # Time Integration
+   AMReX_FEIntegrator.H
+   AMReX_IntegratorBase.H
+   AMReX_RKIntegrator.H
+   AMReX_TimeIntegrator.H
    # GPU --------------------------------------------------------------------
    AMReX_Gpu.H
    AMReX_GpuQualifiers.H
@@ -220,7 +231,6 @@ target_sources( amrex
    AMReX_MemPool.cpp
    AMReX_MemPool.H
    # Profiling ---------------------------------------------------------------
-   AMReX_BLProfiler.cpp
    AMReX_BLBackTrace.cpp
    # Parser ---------------------------------------------------------------
    Parser/AMReX_Parser.cpp
@@ -246,6 +256,16 @@ target_sources( amrex
    # Forward declaration -----------------------------------------------------
    AMReX_BaseFwd.H
    )
+
+# Profiling
+#   this source file has zero symbols in default conditions, which creates
+#   ranlib warnings, e.g., on macOS
+if(AMREX_PROFILING OR AMReX_FORTRAN)
+   target_sources( amrex
+     PRIVATE
+       AMReX_BLProfiler.cpp
+   )
+endif()
 
 # Fortran stuff
 if (AMReX_FORTRAN)

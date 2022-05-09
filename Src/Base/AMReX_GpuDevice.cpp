@@ -86,7 +86,7 @@ std::unique_ptr<sycl::device>  Device::sycl_device;
 
 namespace {
 
-#if ( defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 10) )
+#if defined(__CUDACC__)
     AMREX_GPU_GLOBAL void emptyKernel() {}
 #endif
 
@@ -94,7 +94,7 @@ namespace {
     {
         amrex::ignore_unused(graph_size);
 
-#if ( defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 10) )
+#if defined(__CUDACC__)
 
         BL_PROFILE("InitGraph");
 
@@ -128,19 +128,17 @@ Device::Initialize ()
     // cuda API and cuda driver API initialization that will
     // be captured by the profiler. It a necessary, system
     // dependent step that is unavoidable.
-    nvtxRangeId_t nvtx_init;
-    const char* pname = "initialize_device";
-    nvtx_init = nvtxRangeStartA(pname);
+    nvtxRangePush("initialize_device");
 #endif
 
     ParmParse ppamrex("amrex");
-    ppamrex.query("max_gpu_streams", max_gpu_streams);
+    ppamrex.queryAdd("max_gpu_streams", max_gpu_streams);
     max_gpu_streams = std::min(max_gpu_streams, AMREX_GPU_MAX_STREAMS);
 
     ParmParse pp("device");
 
-    pp.query("v", verbose);
-    pp.query("verbose", verbose);
+    pp.queryAdd("v", verbose);
+    pp.queryAdd("verbose", verbose);
 
     if (amrex::Verbose()) {
         AMREX_HIP_OR_CUDA_OR_DPCPP
@@ -293,7 +291,6 @@ Device::Initialize ()
     // is only available starting from CUDA 10.0, so we will
     // leave num_devices_used as 0 for older CUDA toolkits.
 
-#if (__CUDACC_VER_MAJOR__ >= 10)
     size_t uuid_length = 16;
     size_t recv_sz = uuid_length * ParallelDescriptor::NProcs();
     const char* sendbuf = &device_prop.uuid.bytes[0];
@@ -316,13 +313,12 @@ Device::Initialize ()
     ParallelDescriptor::Bcast<int>(&num_devices_used, 1);
 
     delete[] recvbuf;
-#endif
 
 #if (defined(AMREX_PROFILING) || defined(AMREX_TINY_PROFILING))
-    nvtxRangeEnd(nvtx_init);
+    nvtxRangePop();
 #endif
     if (amrex::Verbose()) {
-#if defined(AMREX_USE_MPI) && (__CUDACC_VER_MAJOR__ >= 10)
+#if defined(AMREX_USE_MPI)
         if (num_devices_used == ParallelDescriptor::NProcs())
         {
             amrex::Print() << "CUDA initialized with 1 GPU per MPI rank; "
@@ -333,9 +329,9 @@ Device::Initialize ()
             amrex::Print() << "CUDA initialized with " << num_devices_used << " GPU(s) and "
                            << ParallelDescriptor::NProcs() << " ranks.\n";
         }
-#else  // Should always be using NVCC >= 10 now, so not going to bother with other combinations.
+#else
         amrex::Print() << "CUDA initialized with 1 GPU\n";
-#endif // AMREX_USE_MPI && NVCC >= 10
+#endif // AMREX_USE_MPI
     }
 
 #elif defined(AMREX_USE_HIP)
@@ -506,9 +502,9 @@ Device::initialize_gpu ()
     int ny = 0;
     int nz = 0;
 
-    pp.query("numThreads.x", nx);
-    pp.query("numThreads.y", ny);
-    pp.query("numThreads.z", nz);
+    pp.queryAdd("numThreads.x", nx);
+    pp.queryAdd("numThreads.y", ny);
+    pp.queryAdd("numThreads.z", nz);
 
     numThreadsOverride.x = (int) nx;
     numThreadsOverride.y = (int) ny;
@@ -518,9 +514,9 @@ Device::initialize_gpu ()
     ny = 0;
     nz = 0;
 
-    pp.query("numBlocks.x", nx);
-    pp.query("numBlocks.y", ny);
-    pp.query("numBlocks.z", nz);
+    pp.queryAdd("numBlocks.x", nx);
+    pp.queryAdd("numBlocks.y", ny);
+    pp.queryAdd("numBlocks.z", nz);
 
     numBlocksOverride.x = (int) nx;
     numBlocksOverride.y = (int) ny;
@@ -529,8 +525,8 @@ Device::initialize_gpu ()
     // Graph initialization
     int graph_init = 0;
     int graph_size = 10000;
-    pp.query("graph_init", graph_init);
-    pp.query("graph_init_nodes", graph_size);
+    pp.queryAdd("graph_init", graph_init);
+    pp.queryAdd("graph_init_nodes", graph_size);
 
     if (graph_init)
     {
@@ -657,7 +653,7 @@ Device::nonNullStreamSynchronize () noexcept
 }
 #endif
 
-#if ( defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 10) )
+#if defined(__CUDACC__)
 
 void
 Device::startGraphRecording(bool first_iter, void* h_ptr, void* d_ptr, size_t sz)

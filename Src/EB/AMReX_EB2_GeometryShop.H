@@ -43,9 +43,14 @@ BrentRootFinder (GpuArray<Real,AMREX_SPACEDIM> const& lo,
                  GpuArray<Real,AMREX_SPACEDIM> const& hi,
                  int rangedir, F const& f) noexcept
 {
+#ifdef AMREX_USE_FLOAT
+    const Real tol = 1.e-4_rt;
+    const Real EPS = 1.0e-6_rt;
+#else
     const Real tol = 1.e-12;
-    const int MAXITER = 100;
     const Real EPS = 3.0e-15;
+#endif
+    const int MAXITER = 100;
 
     Real p, q, r, s;
 
@@ -57,17 +62,17 @@ BrentRootFinder (GpuArray<Real,AMREX_SPACEDIM> const& lo,
     Real c = bPt[rangedir];
     Real fc = fb;
 
-    if (fb*fa > 0.0) {
+    if (fb*fa > 0.0_rt) {
 //        amrex::AllPrint() << "fa " << fa << " fb " << fb << "\n";
         amrex::Error("BrentRootFinder. Root must be bracketed, but instead the supplied end points have the same sign.");
-        return 0.0;
-    } else if (fa == 0.0) {
+        return 0.0_rt;
+    } else if (fa == 0.0_rt) {
         return aPt[rangedir];
-    } else if (fb == 0.0) {
+    } else if (fb == 0.0_rt) {
         return bPt[rangedir];
     }
 
-    Real d = 0.0, e = 0.0;
+    Real d = 0.0_rt, e = 0.0_rt;
     int i;
     for (i = 0; i < MAXITER; ++i)
     {
@@ -91,10 +96,10 @@ BrentRootFinder (GpuArray<Real,AMREX_SPACEDIM> const& lo,
         }
 
         //  Convergence check
-        Real tol1  = 2.0 * EPS * amrex::Math::abs(bPt[rangedir]) + 0.5 * tol;
-        Real xm    = 0.5 * (c - bPt[rangedir]);
+        Real tol1  = 2.0_rt * EPS * amrex::Math::abs(bPt[rangedir]) + 0.5_rt * tol;
+        Real xm    = 0.5_rt * (c - bPt[rangedir]);
 
-        if (amrex::Math::abs(xm) <= tol1 || fb == 0.0)
+        if (amrex::Math::abs(xm) <= tol1 || fb == 0.0_rt)
         {
             break;
         }
@@ -105,15 +110,15 @@ BrentRootFinder (GpuArray<Real,AMREX_SPACEDIM> const& lo,
             s = fb / fa;
             if (aPt[rangedir] == c)
             {
-                p = 2.0 * xm * s;
-                q = 1.0 - s;
+                p = 2.0_rt * xm * s;
+                q = 1.0_rt - s;
             }
             else
             {
                 q = fa / fc;
                 r = fb / fc;
-                p = s * (2.0 * xm * q * (q-r) - (bPt[rangedir]-aPt[rangedir]) * (r-1.0));
-                q = (q-1.0) * (r-1.0) * (s-1.0);
+                p = s * (2.0_rt * xm * q * (q-r) - (bPt[rangedir]-aPt[rangedir]) * (r-1.0_rt));
+                q = (q-1.0_rt) * (r-1.0_rt) * (s-1.0_rt);
             }
 
             //  Check whether in bounds
@@ -121,7 +126,7 @@ BrentRootFinder (GpuArray<Real,AMREX_SPACEDIM> const& lo,
 
             p = amrex::Math::abs(p);
 
-            if (2.0 * p < amrex::min(3.0*xm*q-amrex::Math::abs(tol1*q), 1.0*amrex::Math::abs(e*q)))
+            if (2.0_rt * p < amrex::min(3.0_rt*xm*q-amrex::Math::abs(tol1*q), 1.0_rt*amrex::Math::abs(e*q)))
             {
                 //  Accept interpolation
                 e = d;
@@ -228,9 +233,9 @@ public:
                                                 problo[1]+(j+blo[1])*dx[1],
                                                 problo[2]+(k+blo[2])*dx[2])};
                     Real v = m_f(xyz);
-                    if (v == 0.0) {
+                    if (v == 0.0_rt) {
                         ++nzero;
-                    } else if (v > 0.0) {
+                    } else if (v > 0.0_rt) {
                         ++nbody;
                     } else {
                         ++nfluid;
@@ -268,9 +273,9 @@ public:
                                         problo[1]+j*dx[1],
                                         problo[2]+k*dx[2]));
                 int nbody = 0, nzero = 0, nfluid = 0;
-                if (v == 0.0) {
+                if (v == 0.0_rt) {
                     ++nzero;
-                } else if (v > 0.0) {
+                } else if (v > 0.0_rt) {
                     ++nbody;
                 } else {
                     ++nfluid;
@@ -331,12 +336,32 @@ public:
     void fillFab (BaseFab<Real>& levelset, const Geometry& geom, RunOn,
                   Box const& bounding_box) const noexcept
     {
+#ifdef AMREX_USE_GPU
+        if (!levelset.arena()->isHostAccessible()) {
+            const Box& bx = levelset.box();
+            BaseFab<Real> h_levelset(bx, levelset.nComp(), The_Pinned_Arena());
+            fillFab_Cpu(h_levelset, geom, bounding_box);
+            Gpu::htod_memcpy_async(levelset.dataPtr(), h_levelset.dataPtr(),
+                                   levelset.nBytes(bx, levelset.nComp()));
+            Gpu::streamSynchronize();
+        }
+        else
+#endif
+        {
+            fillFab_Cpu(levelset, geom, bounding_box);
+        }
+    }
+
+    void fillFab_Cpu (BaseFab<Real>& levelset, const Geometry& geom,
+                      Box const& bounding_box) const noexcept
+    {
         const auto problo = geom.ProbLoArray();
         const auto dx = geom.CellSizeArray();
         const Box& bx = levelset.box();
-        const auto& a = levelset.array();
         const auto blo = amrex::lbound(bounding_box);
         const auto bhi = amrex::ubound(bounding_box);
+
+        const auto& a = levelset.array();
         amrex::LoopOnCpu(bx, [&] (int i, int j, int k) noexcept
         {
             a(i,j,k) = m_f(RealArray{AMREX_D_DECL(problo[0]+amrex::Clamp(i,blo.x,bhi.x)*dx[0],
@@ -345,10 +370,11 @@ public:
         });
     }
 
+
     template <class U=F, typename std::enable_if<IsGPUable<U>::value>::type* FOO = nullptr >
     void getIntercept (Array<Array4<Real>,AMREX_SPACEDIM> const& inter_arr,
                        Array<Array4<Type_t const>,AMREX_SPACEDIM> const& type_arr,
-                       Geometry const& geom, RunOn run_on,
+                       Array4<Real const> const&, Geometry const& geom, RunOn run_on,
                        Box const& bounding_box) const noexcept
     {
         auto const& dx = geom.CellSizeArray();
@@ -384,37 +410,70 @@ public:
     template <class U=F, typename std::enable_if<!IsGPUable<U>::value>::type* BAR = nullptr >
     void getIntercept (Array<Array4<Real>,AMREX_SPACEDIM> const& inter_arr,
                        Array<Array4<Type_t const>,AMREX_SPACEDIM> const& type_arr,
-                       Geometry const& geom, RunOn,
+                       Array4<Real const> const&, Geometry const& geom, RunOn,
                        Box const& bounding_box) const noexcept
+    {
+        for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
+            Array4<Real> const& inter = inter_arr[idim];
+            Array4<Type_t const> const& type = type_arr[idim];
+            // When GShop is not GPUable, the intercept is either in managed memory or
+            // in device memory and needs to be copied to host and setup there.
+#ifdef AMREX_USE_GPU
+            if (!The_Arena()->isHostAccessible()) {
+                const Box bx{inter};
+                BaseFab<Real>  h_inter_fab(bx, 1, The_Pinned_Arena());
+                BaseFab<Type_t> h_type_fab(bx, 1, The_Pinned_Arena());
+                Gpu::dtoh_memcpy_async(h_type_fab.dataPtr(), type.dataPtr(),
+                                       h_type_fab.nBytes(bx, 1));
+                Gpu::streamSynchronize();
+                const auto& h_inter = h_inter_fab.array();
+                const auto& h_type  = h_type_fab.const_array();
+                getIntercept_Cpu(h_inter, h_type, geom, bounding_box, idim);
+                Gpu::htod_memcpy_async(inter.dataPtr(), h_inter.dataPtr(),
+                                       h_inter_fab.nBytes(bx, 1));
+                Gpu::streamSynchronize();
+            }
+            else
+#endif
+            {
+                getIntercept_Cpu(inter, type, geom, bounding_box, idim);
+            }
+
+        }
+    }
+
+    void getIntercept_Cpu (Array4<Real> const& inter,
+                           Array4<Type_t const> const& type,
+                           Geometry const& geom,
+                           Box const& bounding_box,
+                           const int idim) const noexcept
     {
         auto const& dx = geom.CellSizeArray();
         auto const& problo = geom.ProbLoArray();
         const auto blo = amrex::lbound(bounding_box);
         const auto bhi = amrex::ubound(bounding_box);
-        for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-            Array4<Real> const& inter = inter_arr[idim];
-            Array4<Type_t const> const& type = type_arr[idim];
-            const Box bx{inter};
-            amrex::LoopOnCpu(bx, [&] (int i, int j, int k) noexcept
-            {
-                if (type(i,j,k) == Type::irregular) {
-                    IntVect ivlo(AMREX_D_DECL(i,j,k));
-                    IntVect ivhi(AMREX_D_DECL(i,j,k));
-                    ivhi[idim] += 1;
-                    inter(i,j,k) = BrentRootFinder
-                        ({AMREX_D_DECL(problo[0]+amrex::Clamp(ivlo[0],blo.x,bhi.x)*dx[0],
-                                       problo[1]+amrex::Clamp(ivlo[1],blo.y,bhi.y)*dx[1],
-                                       problo[2]+amrex::Clamp(ivlo[2],blo.z,bhi.z)*dx[2])},
-                         {AMREX_D_DECL(problo[0]+amrex::Clamp(ivhi[0],blo.x,bhi.x)*dx[0],
-                                       problo[1]+amrex::Clamp(ivhi[1],blo.y,bhi.y)*dx[1],
-                                       problo[2]+amrex::Clamp(ivhi[2],blo.z,bhi.z)*dx[2])},
-                          idim, m_f);
-                } else {
-                    inter(i,j,k) = std::numeric_limits<Real>::quiet_NaN();
-                }
-            });
-        }
+        const Box bx{inter};
+        amrex::LoopOnCpu(bx, [&] (int i, int j, int k) noexcept
+        {
+            if (type(i,j,k) == Type::irregular) {
+                IntVect ivlo(AMREX_D_DECL(i,j,k));
+                IntVect ivhi(AMREX_D_DECL(i,j,k));
+                ivhi[idim] += 1;
+                inter(i,j,k) = BrentRootFinder
+                    ({AMREX_D_DECL(problo[0]+amrex::Clamp(ivlo[0],blo.x,bhi.x)*dx[0],
+                                   problo[1]+amrex::Clamp(ivlo[1],blo.y,bhi.y)*dx[1],
+                                   problo[2]+amrex::Clamp(ivlo[2],blo.z,bhi.z)*dx[2])},
+                     {AMREX_D_DECL(problo[0]+amrex::Clamp(ivhi[0],blo.x,bhi.x)*dx[0],
+                                   problo[1]+amrex::Clamp(ivhi[1],blo.y,bhi.y)*dx[1],
+                                   problo[2]+amrex::Clamp(ivhi[2],blo.z,bhi.z)*dx[2])},
+                     idim, m_f);
+            } else {
+                inter(i,j,k) = std::numeric_limits<Real>::quiet_NaN();
+            }
+        });
     }
+
+
 
     void updateIntercept (Array<Array4<Real>,AMREX_SPACEDIM> const& inter_arr,
                           Array<Array4<Type_t const>,AMREX_SPACEDIM> const& type_arr,
@@ -429,22 +488,41 @@ public:
             AMREX_HOST_DEVICE_PARALLEL_FOR_3D (bx, i, j, k,
             {
                 if (type(i,j,k) == Type::irregular) {
+                    bool is_nan = amrex::isnan(inter(i,j,k));
                     if (idim == 0) {
-                        if (lst(i,j,k) == Real(0.0)) {
+                        if (lst(i,j,k) == Real(0.0) ||
+                            (lst(i,j,k) > Real(0.0) && is_nan))
+                        {
+                            // interp might still be quiet_nan because lst that
+                            // was set to zero has been changed by FillBoundary
+                            // at periodic bounadries.
                             inter(i,j,k) = problo[0] + i*dx[0];
-                        } else if (lst(i+1,j,k) == Real(0.0)) {
+                        }
+                        else if (lst(i+1,j,k) == Real(0.0) ||
+                                 (lst(i+1,j,k) > Real(0.0) && is_nan))
+                        {
                             inter(i,j,k) = problo[0] + (i+1)*dx[0];
                         }
                     } else if (idim == 1) {
-                        if (lst(i,j,k) == Real(0.0)) {
+                        if (lst(i,j,k) == Real(0.0) ||
+                            (lst(i,j,k) > Real(0.0) && is_nan))
+                        {
                             inter(i,j,k) = problo[1] + j*dx[1];
-                        } else if (lst(i,j+1,k) == Real(0.0)) {
+                        }
+                        else if (lst(i,j+1,k) == Real(0.0) ||
+                                 (lst(i,j+1,k) > Real(0.0) && is_nan))
+                        {
                             inter(i,j,k) = problo[1] + (j+1)*dx[1];
                         }
                     } else {
-                        if (lst(i,j,k) == Real(0.0)) {
+                        if (lst(i,j,k) == Real(0.0) ||
+                            (lst(i,j,k) > Real(0.0) && is_nan))
+                        {
                             inter(i,j,k) = problo[2] + k*dx[2];
-                        } else if (lst(i,j,k+1) == Real(0.0)) {
+                        }
+                        else if (lst(i,j,k+1) == Real(0.0) ||
+                                 (lst(i,j,k+1) > Real(0.0) && is_nan))
+                        {
                             inter(i,j,k) = problo[2] + (k+1)*dx[2];
                         }
                     }

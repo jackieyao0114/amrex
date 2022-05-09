@@ -158,8 +158,8 @@ For example, ``COMP=pgi`` alone will compile C/C++ codes with NVCC/GCC
 and Fortran codes with PGI, and link with PGI.  Using ``COMP=pgi`` and
 ``NVCC_HOST_COMP=pgi`` will compile C/C++ codes with PGI and NVCC/PGI.
 
-You can use ``Tutorials/Basic/HelloWorld_C`` to test your programming
-environment.  For example, building with:
+You can use ``amrex-tutorials/ExampleCodes/Basic/HelloWorld_C/``
+to test your programming environment.  For example, building with:
 
 .. highlight:: console
 
@@ -220,7 +220,7 @@ check the :ref:`table <tab:cmakecudavar>` below.
    | AMReX_CUDA_ERROR_CAPTURE_THIS|  Error if a CUDA lambda captures a class' this  | NO          | YES, NO         |
    +------------------------------+-------------------------------------------------+-------------+-----------------+
    | AMReX_CUDA_ERROR_CROSS       |  Error if a host function is called from a host | NO          | YES, NO         |
-   |  _EXECUTION_SPACE_CALL       |   device function                               |             |                 |
+   | _EXECUTION_SPACE_CALL        |  device function                                |             |                 |
    +------------------------------+-------------------------------------------------+-------------+-----------------+
    | AMReX_CUDA_KEEP_FILES        |  Keep intermediately files (folder: nvcc_tmp)   | NO          | YES, NO         |
    +------------------------------+-------------------------------------------------+-------------+-----------------+
@@ -319,8 +319,8 @@ we provide the helper function ``setup_target_for_cuda_compilation()``:
 
 
 
-Enabling HIP support (experimental)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Enabling HIP Support
+^^^^^^^^^^^^^^^^^^^^
 
 To build AMReX with HIP support in CMake, add
 ``-DAMReX_GPU_BACKEND=HIP -DAMReX_AMD_ARCH=<target-arch> -DCMAKE_CXX_COMPILER=<your-hip-compiler>``
@@ -350,8 +350,8 @@ Below is an example configuration for HIP on Tulip:
    cmake --build build -j 6
 
 
-Enabling SYCL support (experimental)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Enabling SYCL Support
+^^^^^^^^^^^^^^^^^^^^^
 
 To build AMReX with SYCL support in CMake, add
 ``-DAMReX_GPU_BACKEND=SYCL -DCMAKE_CXX_COMPILER=<your-sycl-compiler>``
@@ -390,6 +390,8 @@ Below is an example configuration for SYCL:
    | Variable Name                | Description                                     | Default     | Possible values |
    +==============================+=================================================+=============+=================+
    | AMReX_DPCPP_AOT              | Enable DPCPP ahead-of-time compilation          | NO          | YES, NO         |
+   +------------------------------+-------------------------------------------------+-------------+-----------------+
+   | AMREX_INTEL_ARCH             | Specify target if AOT is enabled                | None        | Gen9, etc.      |
    +------------------------------+-------------------------------------------------+-------------+-----------------+
    | AMReX_DPCPP_SPLIT_KERNEL     | Enable DPCPP kernel splitting                   | YES         | YES, NO         |
    +------------------------------+-------------------------------------------------+-------------+-----------------+
@@ -449,8 +451,8 @@ Memory Allocation
 
 To provide portability and improve memory allocation performance,
 AMReX provides a number of memory pools.  When compiled without
-CUDA, all :cpp:`Arena`\ s use standard :cpp:`new` and :cpp:`delete`
-operators. With CUDA, the :cpp:`Arena`\ s each allocate with a
+GPU support, all :cpp:`Arena`\ s use standard :cpp:`new` and :cpp:`delete`
+operators. With GPU support, the :cpp:`Arena`\ s each allocate with a
 specific type of GPU memory:
 
 .. raw:: latex
@@ -573,9 +575,7 @@ that are important for programming GPUs.
 GpuArray, Array1D, Array2D, and Array3D
 ---------------------------------------
 
-As we have mentioned in :ref:`sec:basics:vecandarr`, :cpp:`std::array`
-cannot be used in device code, whereas :cpp:`GpuArray`,
-:cpp:`Array1D`, :cpp:`Array2D`, and :cpp:`Array3D` are trivial types
+:cpp:`GpuArray`, :cpp:`Array1D`, :cpp:`Array2D`, and :cpp:`Array3D` are trivial types
 that work on both host and device. They can be used whenever a fixed size array
 needs to be passed to the GPU or created on GPU.  A variety of
 functions in AMReX return :cpp:`GpuArray` and they can be
@@ -697,17 +697,6 @@ Also note: :cpp:`Gpu::ManagedVector` is not async-safe.  It cannot be safely
 constructed inside of an MFIter loop with GPU kernels and great care should
 be used when accessing :cpp:`Gpu::ManagedVector` data on GPUs to avoid race
 conditions.
-
-amrex::min and amrex::max
--------------------------
-
-GPU versions of ``std::min`` and ``std::max`` are not provided in CUDA.
-So, AMReX provides a templated :cpp:`min` and :cpp:`max` with host and
-device versions to allow functionality on GPUs. Invoke the explicitly
-namespaced :cpp:`amrex::min(A, B)` or :cpp:`amrex::max(x, y)` to use the
-GPU safe implementations. These functions are variadic, so they can take
-any number of arguments and can be invoked with any standard data type.
-
 
 MultiFab Reductions
 -------------------
@@ -886,8 +875,6 @@ Instead of using :cpp:`Elixir`, we can write code like below,
       const Box& bx = mfi.tilebox();
       FArrayBox tmp_fab(bx, numcomps, The_Async_Arena());
       Array4<Real> const& tmp_arr = tmp_fab.array();
-      FArrayBox tmp_fab_2;
-      tmp_fab_2.resize(bx, numcomps, The_Async_Arena());
 
       // GPU kernels using the temporary
     }
@@ -1656,88 +1643,5 @@ by "amrex" in your :cpp:`inputs` file.
 |                            | requested allocation, AMReX will call AMReX::Abort() with an error    |             |             |
 |                            | describing how much free memory there is and what was requested.      |             |             |
 +----------------------------+-----------------------------------------------------------------------+-------------+-------------+
-
-Basic Gpu Debugging
-===================
-
-
-The asynchronous nature of GPU execution can make tracking down bugs complex.
-The relative timing of improperly coded functions can cause variations in output and the timing of error messages
-may not linearly relate to a place in the code.
-One strategy to isolate specific kernel failures is to add ``amrex::Gpu::synchronize()`` or ``amrex::Gpu::streamSynchronize()`` after every ``ParallelFor`` or similar ``amrex::launch`` type call.
-These synchronization commands will halt execution of the code until the GPU or GPU stream, respectively, has finished processing all previously requested tasks, thereby making it easier to locate and identify sources of error.
-
-Debuggers and Related Tools
----------------------------
-
-Users may also find debuggers useful. Architecture agnostic tools include ``gdb``, ``hpctoolkit``, and ``Valgrind``. Note that there are architecture specific implementations of ``gdb`` such as ``cuda-gdb``, ``rocgdb``, ``gdb-amd``, and the Intel ``gdb``.
-Usage of several of these variations are described in the following sections.
-
-For advance debugging topics and tools, refer to system-specific documentation (e.g. https://docs.olcf.ornl.gov/systems/summit_user_guide.html#debugging).
-
-
-CUDA-Specific Tests
--------------------
-
-- To test if your kernels have launched, run:
-
-  ::
-
-    nvprof ./main3d.xxx
-
-  If using NVIDIA Nsight Compute instead, access ``nvprof`` functionality with:
-
-  ::
-
-    nsys nvprof ./main3d.xxx
-
-- Run ``nvprof -o profile%p.nvvp ./main3d.xxxx`` or
-  ``nsys profile -o nsys_out.%q{SLURM_PROCID}.%q{SLURM_JOBID} ./main3d.xxx`` for
-  a small problem and examine page faults using ``nvvp`` or ``nsight-sys $(pwd)/nsys_out.#.######.qdrep``.
-
-- Run under ``cuda-memcheck`` to identify memory errors.
-
-- Run under ``cuda-gdb`` to identify kernel errors.
-
-- To help identify race conditions, globally disable asynchronicity of kernel launches for all
-  CUDA applications by setting ``CUDA_LAUNCH_BLOCKING=1`` in your environment variables. This
-  will ensure that only one CUDA kernel will run at a time.
-
-AMD ROCm-Specific Tests
------------------------
-
-- To test if your kernels have launched, run:
-
-  ::
-
-    rocprof ./main3d.xxx
-
-- Run ``rocprof  --hsa-trace --stats --timestamp on --roctx-trace ./main3d.xxxx`` for
-  a small problem and examine tracing using ``chrome://tracing``.
-
-- Run under ``rocgdb`` for source-level debugging.
-
-- To help identify if there are race conditions, globally disable asynchronicity of kernel launches by setting ``CUDA_LAUNCH_BLOCKING=1`` or ``HIP_LAUNCH_BLOCKING=1``
-  in your environment variables. This will ensure only one kernel will run at a time.
-  See the `AMD ROCm docs' chicken bits section`_ for more debugging environment variables.
-
-.. _`AMD ROCm docs' chicken bits section`: https://rocmdocs.amd.com/en/latest/Programming_Guides/HIP_Debugging.html#chicken-bits
-
-Intel GPU Specific Tests
-------------------------
-
-- To test if your kernels have launched, run:
-
-  ::
-
-    ./ze_tracer ./main3d.xxx
-
-- Run Intel Advisor,
-  ``advisor --collect=survey ./main3d.xxx`` for
-  a small problem with 1 MPI process and examine metrics.
-
-- Run under ``gdb`` with the `Intel Distribution for GDB`_.
-
-- To report back-end information, set ``ZE_DEBUG=1`` in your environment variables.
-
-.. _`Intel Distribution for GDB`: https://software.intel.com/content/www/us/en/develop/tools/oneapi/components/distribution-for-gdb.html
+| the_arena_is_managed       | Whether :cpp:`The_Arena()` allocates managed memory.                  | Bool        | True        |
++----------------------------+-----------------------------------------------------------------------+-------------+-------------+

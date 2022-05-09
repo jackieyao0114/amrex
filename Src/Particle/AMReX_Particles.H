@@ -48,9 +48,6 @@
 
 #ifdef AMREX_USE_HDF5
 #include <hdf5.h>
-/* #ifdef AMREX_USE_HDF5_ASYNC */
-/* #include "h5_vol_external_async_native.h" */
-/* #endif */
 #endif
 
 #include <algorithm>
@@ -71,7 +68,7 @@
 namespace amrex {
 
 #ifdef AMREX_USE_HDF5_ASYNC
-extern hid_t es_par_g;
+    extern hid_t es_par_g;
 #endif
 /**
 * \brief A struct used for communicating particle data across processes
@@ -193,8 +190,8 @@ public:
     ParticleContainer ()
       :
       ParticleContainerBase(),
-      h_communicate_real_comp(NArrayReal, true),
-      h_communicate_int_comp(NArrayInt, true),
+      h_redistribute_real_comp(AMREX_SPACEDIM + NStructReal + NArrayReal, true),
+      h_redistribute_int_comp(2 + NStructInt + NArrayInt, true),
       m_runtime_comps_defined(false),
       m_num_runtime_real(0),
       m_num_runtime_int(0)
@@ -212,8 +209,8 @@ public:
     ParticleContainer (ParGDBBase* gdb)
         :
         ParticleContainerBase(gdb),
-        h_communicate_real_comp(NArrayReal, true),
-        h_communicate_int_comp(NArrayInt, true),
+        h_redistribute_real_comp(AMREX_SPACEDIM + NStructReal + NArrayReal, true),
+        h_redistribute_int_comp(2 + NStructInt + NArrayInt, true),
         m_runtime_comps_defined(false),
         m_num_runtime_real(0),
         m_num_runtime_int(0)
@@ -235,8 +232,8 @@ public:
                        const BoxArray            & ba)
         :
         ParticleContainerBase(geom, dmap, ba),
-        h_communicate_real_comp(NArrayReal, true),
-        h_communicate_int_comp(NArrayInt, true),
+        h_redistribute_real_comp(AMREX_SPACEDIM + NStructReal + NArrayReal, true),
+        h_redistribute_int_comp(2 + NStructInt + NArrayInt, true),
         m_runtime_comps_defined(false),
         m_num_runtime_real(0),
         m_num_runtime_int(0)
@@ -261,8 +258,8 @@ public:
                        const Vector<int>                 & rr)
         :
         ParticleContainerBase(geom, dmap, ba, rr),
-        h_communicate_real_comp(NArrayReal, true),
-        h_communicate_int_comp(NArrayInt, true),
+        h_redistribute_real_comp(AMREX_SPACEDIM + NStructReal + NArrayReal, true),
+        h_redistribute_int_comp(2 + NStructInt + NArrayInt, true),
         m_runtime_comps_defined(false),
         m_num_runtime_real(0),
         m_num_runtime_int(0)
@@ -286,8 +283,8 @@ public:
                        const Vector<IntVect>             & rr)
         :
         ParticleContainerBase(geom, dmap, ba, rr),
-        h_communicate_real_comp(NArrayReal, true),
-        h_communicate_int_comp(NArrayInt, true),
+        h_redistribute_real_comp(AMREX_SPACEDIM + NStructReal + NArrayReal, true),
+        h_redistribute_int_comp(2 + NStructInt + NArrayInt, true),
         m_runtime_comps_defined(false),
         m_num_runtime_real(0),
         m_num_runtime_int(0)
@@ -297,7 +294,7 @@ public:
         resizeData();
     }
 
-    virtual ~ParticleContainer () {}
+    virtual ~ParticleContainer () = default;
 
     ParticleContainer ( const ParticleContainer &) = delete;
     ParticleContainer& operator= ( const ParticleContainer & ) = delete;
@@ -355,11 +352,30 @@ public:
         resizeData();
     }
 
+    //! \brief Define a default-constructed ParticleContainer using a ParGDB object.
+    //! Multi-level version
+    //!
+    //! \param geom A Vector of Geometry objects, one for each level
+    //! \param dmap A Vector of DistributionMappings, one for each level
+    //! \param ba A Vector of BoxArrays, one for each level
+    //! \param rr A Vector of integer refinement ratios, of size num_levels - 1. rr[n] gives the
+    //! refinement ratio between levels n and n+1
+    //!
+    void Define (const Vector<Geometry>            & geom,
+                 const Vector<DistributionMapping> & dmap,
+                 const Vector<BoxArray>            & ba,
+                 const Vector<IntVect>             & rr)
+    {
+        this->ParticleContainerBase::Define(geom, dmap, ba, rr);
+        reserveData();
+        resizeData();
+    }
+
     //! \brief The total number of tiles on this rank on this level
     int numLocalTilesAtLevel (int lev) const { return m_particles[lev].size(); }
 
-    void reserveData ();
-    void resizeData ();
+    void reserveData () override;
+    void resizeData () override;
 
     void InitFromAsciiFile (const std::string& file, int extradata,
                             const IntVect* Nrep = nullptr);
@@ -478,7 +494,8 @@ public:
     *              a particle can have moved since the last Redistribute() call. Knowing this number
     *              allows an optimized MPI communication pattern to be used.
     */
-    void Redistribute (int lev_min = 0, int lev_max = -1, int nGrow = 0, int local=0);
+    void Redistribute (int lev_min = 0, int lev_max = -1, int nGrow = 0, int local=0,
+                       bool remove_negative=true);
 
     /**
      * \brief Sort the particles on each tile by cell, using Fortran ordering.
@@ -724,6 +741,7 @@ public:
       * \param real_comp_names for each real component, a name to label the data with
       * \param int_comp_names for each integer component, a name to label the data with
       * \param f callable that returns whether a given particle should be written or not
+      * \param is_checkpoint whether the data is written to a checkpoint or plotfile
       */
     template <class F>
     void WriteBinaryParticleData (const std::string& dir,
@@ -732,7 +750,7 @@ public:
                                   const Vector<int>& write_int_comp,
                                   const Vector<std::string>& real_comp_names,
                                   const Vector<std::string>&  int_comp_names,
-                                                                  F&& f) const;
+                                  F&& f, bool is_checkpoint=false) const;
 
     void CheckpointPre ();
 
@@ -774,7 +792,7 @@ public:
      * \param name The name of the sub-directory for this particle type (i.e. "Tracer")
      * \param f callable that returns whether or not to write each particle
      */
-    template <class F, typename std::enable_if<!std::is_same<F, Vector<std::string>>::value>::type* = nullptr>
+    template <class F, typename std::enable_if<!std::is_same<F, Vector<std::string>&>::value>::type* = nullptr>
     void WritePlotFile (const std::string& dir, const std::string& name, F&& f) const;
 
     /**
@@ -921,253 +939,6 @@ public:
     void WritePlotFilePost ();
 
     void WriteAsciiFile (const std::string& file);
-
-#ifdef AMREX_USE_HDF5
-
-    /**
-    * \brief Write a contiguous chunk of real particle data to an HDF5 file.
-    *
-    * \param data A pointer to the start of the buffer to write
-    * \param size The number of elements to write
-    * \param os The HDF5 file into which to write the data
-    */
-    void WriteParticleRealDataHDF5 (void* data, size_t size, hid_t fid) const;
-
-    /**
-    * \brief Read a contiguous chunk of real particle data from an istream.
-    *
-    * \param data A pointer to the start of the buffer into which to read
-    * \param size The number of elements to read
-    * \param os The istream from which to read the data
-    * \param rd A RealDescriptor describing the type of the floating point data
-    */
-    void ReadParticleRealDataHDF5 (void* data, size_t size, hid_t fid);
-
-    /**
-     * \brief Writes a particle checkpoint to file, suitable for restarting.
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param name The name of the sub-directory for this particle type (i.e. "Tracer")
-     */
-    void CheckpointHDF5 (const std::string& dir, const std::string& name) const;
-
-    /**
-     * \brief Writes a particle checkpoint to file, suitable for restarting.
-     */
-    void CheckpointHDF5 (const std::string& dir, const std::string& name, bool is_checkpoint,
-                         const Vector<std::string>& real_comp_names = Vector<std::string>(),
-                         const Vector<std::string>& int_comp_names = Vector<std::string>()) const;
-
-     /**
-      * \brief Writes particle data to disk in the AMReX native format.
-      *
-      * \tparam F function type
-      *
-      * \param dir The base directory into which to write (i.e. "plt00000")
-      * \param name The name of the sub-directory for this particle type (i.e. "Tracer")
-      * \param write_real_comp for each real component, whether or not we include that component in the file
-      * \param write_int_comp for each integer component, whether or not we include that component in the file
-      * \param real_comp_names for each real component, a name to label the data with
-      * \param int_comp_names for each integer component, a name to label the data with
-      * \param f callable that returns whether a given particle should be written or not
-      */
-    template <class F>
-    void WriteHDF5ParticleData (const std::string& dir,
-                                const std::string& name,
-                                const Vector<int>& write_real_comp,
-                                const Vector<int>& write_int_comp,
-                                const Vector<std::string>& real_comp_names,
-                                const Vector<std::string>&  int_comp_names,
-                                                                F&& f) const;
-
-
-    void CheckpointPreHDF5 ();
-
-    void CheckpointPostHDF5 ();
-
-    /**
-     * \brief Restart from checkpoint
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     */
-    void RestartHDF5 (const std::string& dir, const std::string& file);
-
-    /**
-     * \brief Older version, for backwards compatibility
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param is_checkpoint Whether the particle id and cpu are included in the file.
-     */
-    void RestartHDF5 (const std::string& dir, const std::string& file, bool is_checkpoint);
-
-    /**
-     * \brief This version of WritePlotFile writes all components and assigns component names
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param name The name of the sub-directory for this particle type (i.e. "Tracer")
-     */
-    void WritePlotFileHDF5 (const std::string& dir, const std::string& name) const;
-
-    /**
-     * \brief This version of WritePlotFile writes all components and assigns component names
-     *
-     * This version also lets you pass in a functor to toggle whether each particle gets output.
-     *
-     * \tparam F function type
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param name The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param f callable that returns whether or not to write each particle
-     */
-    template <class F, typename std::enable_if<!std::is_same<F, Vector<std::string>>::value>::type* = nullptr>
-    void WritePlotFileHDF5 (const std::string& dir, const std::string& name, F&& f) const;
-
-    /**
-     * \brief This version of WritePlotFile writes all components and allows the user to specify the names of the components.
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param real_comp_names for each real component, a name to label the data with
-     * \param int_comp_names for each integer component, a name to label the data with
-     */
-    void WritePlotFileHDF5 (const std::string& dir, const std::string& name,
-                            const Vector<std::string>& real_comp_names,
-                            const Vector<std::string>&  int_comp_names) const;
-
-    /**
-     * \brief This version of WritePlotFile writes all components and allows the user to specify the names of the components.
-     *
-     * This version also lets you pass in a functor to toggle whether each particle gets output.
-     *
-     * \tparam F function type
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param real_comp_names for each real component, a name to label the data with
-     * \param int_comp_names for each integer component, a name to label the data with
-     * \param f callable that returns whether or not to write each particle
-     */
-    template <class F>
-    void WritePlotFileHDF5 (const std::string& dir, const std::string& name,
-                            const Vector<std::string>& real_comp_names,
-                            const Vector<std::string>&  int_comp_names, F&& f) const;
-
-    /**
-     * \brief This version of WritePlotFile writes all components and allows the user to specify
-     * the names of the components.
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param real_comp_names for each real component, a name to label the data with
-     */
-    void WritePlotFileHDF5 (const std::string& dir, const std::string& name,
-                            const Vector<std::string>& real_comp_names) const;
-
-    /**
-     * \brief This version of WritePlotFile writes all components and allows the user to specify
-     * the names of the components.
-     *
-     * This version also lets you pass in a functor to toggle whether each particle gets output.
-     *
-     * \tparam F function type
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param real_comp_names for each real component, a name to label the data with
-     * \param f callable that returns whether or not to write each particle
-     */
-    template <class F, typename std::enable_if<!std::is_same<F, Vector<std::string>>::value>::type* = nullptr>
-    void WritePlotFileHDF5 (const std::string& dir, const std::string& name,
-                            const Vector<std::string>& real_comp_names, F&& f) const;
-
-    /**
-     * \brief This version of WritePlotFile assigns component names, but allows the user to pass
-     * in a vector of ints that toggle on / off the writing of specfic components.
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param write_real_comp for each real component, whether to include that comp in the file
-     * \param write_int_comp for each integer component, whether to include that comp in the file
-     */
-    void WritePlotFileHDF5 (const std::string& dir,
-                            const std::string& name,
-                            const Vector<int>& write_real_comp,
-                            const Vector<int>& write_int_comp) const;
-
-    /**
-     * \brief This version of WritePlotFile assigns component names, but allows the user to pass
-     * in a vector of ints that toggle on / off the writing of specfic components.
-     *
-     * This version also lets you pass in a functor to toggle whether each particle gets output.
-     *
-     * \tparam F function type
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param write_real_comp for each real component, whether to include that comp in the file
-     * \param write_int_comp for each integer component, whether to include that comp in the file
-     * \param f callable that returns whether or not to write each particle
-     */
-    template <class F>
-    void WritePlotFileHDF5 (const std::string& dir,
-                            const std::string& name,
-                            const Vector<int>& write_real_comp,
-                            const Vector<int>& write_int_comp, F&& f) const;
-
-    /**
-     * \brief This is the most general version of WritePlotFile, which takes component
-     * names and flags for whether to write each variable as components. Note that
-     * the user should pass in vectors containing names of all the components, whether
-     * they are written or not.
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param write_real_comp for each real component, whether to include that comp in the file
-     * \param write_int_comp for each integer component, whether to include that comp in the file
-     * \param real_comp_names for each real component, a name to label the data with
-     * \param int_comp_names for each integer component, a name to label the data with
-     */
-    void WritePlotFileHDF5 (const std::string& dir,
-                            const std::string& name,
-                            const Vector<int>& write_real_comp,
-                            const Vector<int>& write_int_comp,
-                            const Vector<std::string>& real_comp_names,
-                            const Vector<std::string>&  int_comp_names) const;
-
-    /**
-     * \brief This is the most general version of WritePlotFile, which takes component
-     * names and flags for whether to write each variable as components. Note that
-     * the user should pass in vectors containing names of all the components, whether
-     * they are written or not.
-     *
-     *  This version also lets you pass in a functor to toggle whether each particle gets output.
-     *
-     * \tparam F function type
-     *
-     * \param dir The base directory into which to write (i.e. "plt00000")
-     * \param file The name of the sub-directory for this particle type (i.e. "Tracer")
-     * \param write_real_comp for each real component, whether to include that comp in the file
-     * \param write_int_comp for each integer component, whether to include that comp in the file
-     * \param real_comp_names for each real component, a name to label the data with
-     * \param int_comp_names for each integer component, a name to label the data with
-     * \param f callable that returns whether or not to write each particle
-     */
-    template <class F>
-    void WritePlotFileHDF5 (const std::string& dir,
-                            const std::string& name,
-                            const Vector<int>& write_real_comp,
-                            const Vector<int>& write_int_comp,
-                            const Vector<std::string>& real_comp_names,
-                            const Vector<std::string>&  int_comp_names,
-                            F&& f) const;
-
-    void WritePlotFilePreHDF5 ();
-
-    void WritePlotFilePostHDF5 ();
-
-#endif /*AMREX_USE_HDF5*/
 
     /**
      * \brief Return the underyling Vector (over AMR levels) of ParticleLevels.
@@ -1434,9 +1205,11 @@ public:
       return doUnlink;
     }
 
-    void RedistributeCPU (int lev_min = 0, int lev_max = -1, int nGrow = 0, int local=0);
+    void RedistributeCPU (int lev_min = 0, int lev_max = -1, int nGrow = 0, int local=0,
+                          bool remove_negative=true);
 
-    void RedistributeGPU (int lev_min = 0, int lev_max = -1, int nGrow = 0, int local=0);
+    void RedistributeGPU (int lev_min = 0, int lev_max = -1, int nGrow = 0, int local=0,
+                          bool remove_negative=true);
 
     Long superParticleSize() const { return superparticle_size; }
 
@@ -1446,7 +1219,7 @@ public:
     {
         m_runtime_comps_defined = true;
         m_num_runtime_real++;
-        h_communicate_real_comp.push_back(communicate);
+        h_redistribute_real_comp.push_back(communicate);
         SetParticleSize();
     }
 
@@ -1456,7 +1229,7 @@ public:
     {
         m_runtime_comps_defined = true;
         m_num_runtime_int++;
-        h_communicate_int_comp.push_back(communicate);
+        h_redistribute_int_comp.push_back(communicate);
         SetParticleSize();
     }
 
@@ -1466,10 +1239,37 @@ public:
     int NumRealComps () const { return NArrayReal + NumRuntimeRealComps(); }
     int NumIntComps  () const { return NArrayInt  + NumRuntimeIntComps() ; }
 
-    Vector<int> h_communicate_real_comp;
-    Vector<int> h_communicate_int_comp;
-    Gpu::DeviceVector<int> d_communicate_real_comp;
-    Gpu::DeviceVector<int> d_communicate_int_comp;
+    /** type trait to translate one particle container to another, with changed allocator */
+    template <template<class> class NewAllocator=amrex::DefaultAllocator>
+    using ContainerLike = amrex::ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, NewAllocator>;
+
+    /** Create an empty particle container
+     *
+     * This creates a new AMReX particle container type with same compile-time
+     * and run-time attributes. But, it can change its allocator. This is
+     * helpful when creating temporary particle buffers for filter operations
+     * and device-to-host copies.
+     *
+     * @tparam Allocator AMReX allocator, e.g., amrex::PinnedArenaAllocator
+     * @return an empty particle container
+     * */
+    template <template<class> class NewAllocator=amrex::DefaultAllocator>
+    ContainerLike<NewAllocator>
+    make_alike () const
+    {
+        ContainerLike<NewAllocator> tmp(m_gdb);
+
+        // add runtime real comps to tmp
+        for (int ic = 0; ic < this->NumRuntimeRealComps(); ++ic) { tmp.AddRealComp(false); }
+
+        // add runtime int comps to tmp
+        for (int ic = 0; ic < this->NumRuntimeIntComps(); ++ic) { tmp.AddIntComp(false); }
+
+        return tmp;
+    }
+
+    Vector<int> h_redistribute_real_comp;
+    Vector<int> h_redistribute_int_comp;
 
     //! Variables for i/o optimization saved for pre and post checkpoint
     mutable bool levelDirectoriesCreated;
@@ -1523,24 +1323,15 @@ public:
     WriteParticles (int level, std::ofstream& ofs, int fnum,
                     Vector<int>& which, Vector<int>& count, Vector<Long>& where,
                     const Vector<int>& write_real_comp, const Vector<int>& write_int_comp,
-                    const Vector<std::map<std::pair<int, int>,IntVector>>& particle_io_flags) const;
+                    const Vector<std::map<std::pair<int, int>,IntVector>>& particle_io_flags, bool is_checkpoint) const;
 #ifdef AMREX_USE_HDF5
-    void
-    WriteParticlesHDF5 (int level, hid_t grp,
-                        Vector<int>& which, Vector<int>& count, Vector<Long>& where,
-                        const Vector<int>& write_real_comp, const Vector<int>& write_int_comp,
-                        const Vector<std::map<std::pair<int, int>,IntVector>>& particle_io_flags) const;
+#include "AMReX_ParticlesHDF5.H"
 #endif
 
 protected:
 
-#ifdef AMREX_USE_HDF5
-template <class RTYPE>
-    void ReadParticlesHDF5 (hsize_t offset, hsize_t count, int grd, int lev, hid_t int_dset, hid_t real_dset, int finest_level_in_file);
-#endif
-
     template <class RTYPE>
-    void ReadParticles (int cnt, int grd, int lev, std::ifstream& ifs, int finest_level_in_file);
+    void ReadParticles (int cnt, int grd, int lev, std::ifstream& ifs, int finest_level_in_file, bool convert_ids);
 
     void SetParticleSize ();
 
@@ -1573,7 +1364,10 @@ private:
 #include "AMReX_ParticleInit.H"
 #include "AMReX_ParticleContainerI.H"
 #include "AMReX_ParticleIO.H"
+
+#ifdef AMREX_USE_HDF5
 #include "AMReX_ParticleHDF5.H"
+#endif
 
 }
 

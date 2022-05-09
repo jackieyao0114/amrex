@@ -154,10 +154,6 @@ struct FBData {
     const FabArrayBase::FB*  fb = nullptr;
     int                 scomp;
     int                 ncomp;
-    IntVect             nghost;
-    Periodicity         period;
-    bool                cross;
-    bool                epo;
 
     //
     char*               the_recv_data = nullptr;
@@ -183,8 +179,6 @@ struct PCData {
     FabArrayBase::CpOp  op;
     int                 tag = -1;
     int                 actual_n_rcvs = -1;
-    IntVect             snghost, dnghost;
-    Periodicity         period;
     int                 SC = -1, NC = -1, DC = -1;
 
     char*               the_recv_data = nullptr;
@@ -262,6 +256,51 @@ Copy (FabArray<FAB>& dst, FabArray<FAB> const& src, int srccomp, int dstcomp, in
     }
 }
 
+template <class FAB,
+          class bar = std::enable_if_t<IsBaseFab<FAB>::value> >
+void
+Add (FabArray<FAB>& dst, FabArray<FAB> const& src, int srccomp, int dstcomp, int numcomp, int nghost)
+{
+    Add(dst,src,srccomp,dstcomp,numcomp,IntVect(nghost));
+}
+
+template <class FAB,
+          class bar = std::enable_if_t<IsBaseFab<FAB>::value> >
+void
+Add (FabArray<FAB>& dst, FabArray<FAB> const& src, int srccomp, int dstcomp, int numcomp, const IntVect& nghost)
+{
+#ifdef AMREX_USE_GPU
+    if (Gpu::inLaunchRegion() && dst.isFusingCandidate()) {
+        auto const& dstfa = dst.arrays();
+        auto const& srcfa = src.const_arrays();
+        ParallelFor(dst, nghost, numcomp,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
+        {
+            dstfa[box_no](i,j,k,n+dstcomp) += srcfa[box_no](i,j,k,n+srccomp);
+        });
+        Gpu::streamSynchronize();
+    } else
+#endif
+    {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const Box& bx = mfi.growntilebox(nghost);
+            if (bx.ok())
+            {
+                auto const srcFab = src.array(mfi);
+                auto       dstFab = dst.array(mfi);
+                AMREX_HOST_DEVICE_PARALLEL_FOR_4D( bx, numcomp, i, j, k, n,
+                {
+                    dstFab(i,j,k,n+dstcomp) += srcFab(i,j,k,n+srccomp);
+                });
+            }
+        }
+    }
+}
+
 template <class FAB>
 class FabArray
     :
@@ -281,7 +320,15 @@ public:
 
     //
     //! Constructs an empty FabArray<FAB>.
-    FabArray ();
+    FabArray () noexcept;
+
+    /**
+     * \brief Construct an empty FabArray<FAB> that has a default Arena.  If
+     * `define` is called later with a nulltpr as MFInfo's arena, the
+     * default Arena `a` will be used.  If the arena in MFInfo is not a
+     * nullptr, the MFInfo's arena will be used.
+     */
+    explicit FabArray (Arena* a) noexcept;
 
     /**
     * \brief Construct a FabArray<FAB> with a valid region defined by bxs
@@ -755,9 +802,28 @@ public:
                               const IntVect&       dst_nghost,
                               const Periodicity&   period = Periodicity::NonPeriodic(),
                               CpOp                 op = FabArrayBase::COPY,
-                              const FabArrayBase::CPC* a_cpc = nullptr);
+                              const FabArrayBase::CPC* a_cpc = nullptr,
+                              bool                 to_ghost_cells_only = false);
 
     void ParallelCopy_finish ();
+
+    void ParallelCopyToGhost (const FabArray<FAB>& src,
+                              int                  src_comp,
+                              int                  dest_comp,
+                              int                  num_comp,
+                              const IntVect&       src_nghost,
+                              const IntVect&       dst_nghost,
+                              const Periodicity&   period = Periodicity::NonPeriodic());
+
+    void ParallelCopyToGhost_nowait (const FabArray<FAB>& src,
+                                     int                  src_comp,
+                                     int                  dest_comp,
+                                     int                  num_comp,
+                                     const IntVect&       src_nghost,
+                                     const IntVect&       dst_nghost,
+                                     const Periodicity&   period = Periodicity::NonPeriodic());
+
+    void ParallelCopyToGhost_finish();
 
     [[deprecated("Use FabArray::ParallelCopy() instead.")]]
     void copy (const FabArray<FAB>& src,
@@ -788,50 +854,21 @@ public:
                        int                  num_comp,
                        const IntVect&       nghost);
 
-    //
-    // In the following copyTo functions, the destination FAB is identical on each process!!
-    //
-
-    /**
-    * brief Copy the values contained in the intersection of the
-    * valid + nghost region of this FabArray with the FAB dest into dest.
-    */
-    void copyTo (FAB& dest,
-                 int  nghost = 0) const;
-
     /**
     * \brief Copy the values contained in the intersection of the
-    * valid + nghost region of this FabArray with the FAB dest and the Box
-    * subbox into that subregion of dest.
+    * valid + nghost region of this FabArray with the FAB dest into dest.
+    * Note that FAB dest is assumed to be identical on each process.
     */
-    void copyTo (FAB&       dest,
-                 const Box& subbox,
-                 int        nghost = 0) const;
+    void copyTo (FAB& dest, int  nghost = 0) const;
 
     /**
     * \brief Copy the values contained in the intersection of the
     * num_comp component valid + nghost region of this FabArray, starting at
     * component src_comp, with the FAB dest into dest, starting at
     * component dest_comp in dest.
+    * Note that FAB dest is assumed to be identical on each process.
     */
-    void copyTo (FAB& dest,
-                 int  src_comp,
-                 int  dest_comp,
-                 int  num_comp,
-                 int  nghost = 0) const;
-
-    /**
-    * \brief Copy the values contained in the intersection of the
-    * num_comp component valid + nghost region of this FabArray, starting at
-    * component src_comp, with the FAB dest and the Box subbox, into
-    * dest, starting at component dest_comp in dest.
-    */
-    void copyTo (FAB&       dest,
-                 const Box& subbox,
-                 int        src_comp,
-                 int        dest_comp,
-                 int        num_comp,
-                 int        nghost = 0) const;
+    void copyTo (FAB& dest, int  src_comp, int  dest_comp, int  num_comp, int  nghost = 0) const;
 
     //! Shift the boxarray by vector v
     void shift (const IntVect& v);
@@ -850,25 +887,111 @@ public:
     * FillBoundary expects that its cell-centered version of its BoxArray
     * is non-overlapping.
     */
+    template <typename BUF=value_type>
     void FillBoundary (bool cross = false);
 
+    template <typename BUF=value_type>
     void FillBoundary (const Periodicity& period, bool cross = false);
+
+    template <typename BUF=value_type>
     void FillBoundary (const IntVect& nghost, const Periodicity& period, bool cross = false);
 
     //! Same as FillBoundary(), but only copies ncomp components starting at scomp.
+    template <typename BUF=value_type>
     void FillBoundary (int scomp, int ncomp, bool cross = false);
+
+    template <typename BUF=value_type>
     void FillBoundary (int scomp, int ncomp, const Periodicity& period, bool cross = false);
+
+    template <typename BUF=value_type>
     void FillBoundary (int scomp, int ncomp, const IntVect& nghost, const Periodicity& period, bool cross = false);
 
+    template <typename BUF=value_type>
     void FillBoundary_nowait (bool cross = false);
+
+    template <typename BUF=value_type>
     void FillBoundary_nowait (const Periodicity& period, bool cross = false);
+
+    template <typename BUF=value_type>
+    void FillBoundary_nowait (const IntVect& nghost, const Periodicity& period, bool cross = false);
+
+    template <typename BUF=value_type>
     void FillBoundary_nowait (int scomp, int ncomp, bool cross = false);
+
+    template <typename BUF=value_type>
     void FillBoundary_nowait (int scomp, int ncomp, const Periodicity& period, bool cross = false);
+
+    template <typename BUF=value_type>
     void FillBoundary_nowait (int scomp, int ncomp, const IntVect& nghost, const Periodicity& period, bool cross = false);
-    template <class F=FAB, typename std::enable_if<IsBaseFab<F>::value,int>::type = 0>
+
+    template <typename BUF=value_type,
+              class F=FAB, typename std::enable_if<IsBaseFab<F>::value,int>::type = 0>
     void FillBoundary_finish ();
 
     void FillBoundary_test ();
+
+
+    /**
+     * \brief Fill ghost cells and synchronize nodal data. Ghost regions are
+     * filled with data from the intersecting valid regions. The
+     * synchronization will override valid regions by the intersecting valid
+     * regions with a higher precedence.  The smaller the global box index
+     * is, the higher precedence the box has.  With periodic boundaries, for
+     * cells in the same box, those near the lower corner have higher
+     * precedence than those near the upper corner.
+     *
+     * \param period periodic length if it's non-zero
+     */
+    void FillBoundaryAndSync (const Periodicity& period = Periodicity::NonPeriodic());
+    /**
+     * \brief Fill ghost cells and synchronize nodal data. Ghost regions are
+     * filled with data from the intersecting valid regions. The
+     * synchronization will override valid regions by the intersecting valid
+     * regions with a higher precedence.  The smaller the global box index
+     * is, the higher precedence the box has.  With periodic boundaries, for
+     * cells in the same box, those near the lower corner have higher
+     * precedence than those near the upper corner.
+     *
+     * \param scomp starting component
+     * \param ncomp number of components
+     * \param nghost number of ghost cells to fill
+     * \param period periodic length if it's non-zero
+     */
+    void FillBoundaryAndSync (int scomp, int ncomp, const IntVect& nghost,
+                              const Periodicity& period);
+    void FillBoundaryAndSync_nowait (const Periodicity& period = Periodicity::NonPeriodic());
+    void FillBoundaryAndSync_nowait (int scomp, int ncomp, const IntVect& nghost,
+                                     const Periodicity& period);
+    void FillBoundaryAndSync_finish ();
+
+    /**
+     * \brief Synchronize nodal data.  The synchronization will override
+     * valid regions by the intersecting valid regions with a higher
+     * precedence.  The smaller the global box index is, the higher
+     * precedence the box has.  With periodic boundaries, for cells in the
+     * same box, those near the lower corner have higher precedence than
+     * those near the upper corner.
+     *
+     * \param period periodic length if it's non-zero
+     */
+    void OverrideSync (const Periodicity& period = Periodicity::NonPeriodic());
+    /**
+     * \brief Synchronize nodal data.  The synchronization will override
+     * valid regions by the intersecting valid regions with a higher
+     * precedence.  The smaller the global box index is, the higher
+     * precedence the box has.  With periodic boundaries, for cells in the
+     * same box, those near the lower corner have higher precedence than
+     * those near the upper corner.
+     *
+     * \param scomp starting component
+     * \param ncomp number of components
+     * \param nghost number of ghost cells to fill
+     * \param period periodic length if it's non-zero
+     */
+    void OverrideSync (int scomp, int ncomp, const Periodicity& period);
+    void OverrideSync_nowait (const Periodicity& period = Periodicity::NonPeriodic());
+    void OverrideSync_nowait (int scomp, int ncomp, const Periodicity& period);
+    void OverrideSync_finish ();
 
     /**
     * \brief Sum values in overlapped cells.  The destination is limited to valid cells.
@@ -918,10 +1041,12 @@ public:
 
     // The following are private functions.  But we have to make them public for cuda.
 
-    template <class F=FAB, typename std::enable_if<IsBaseFab<F>::value,int>::type = 0>
+    template <typename BUF=value_type,
+              class F=FAB, typename std::enable_if<IsBaseFab<F>::value,int>::type = 0>
     void FBEP_nowait (int scomp, int ncomp, const IntVect& nghost,
                       const Periodicity& period, bool cross,
-                      bool enforce_periodicity_only = false);
+                      bool enforce_periodicity_only = false,
+                      bool override_sync = false);
 
     void FB_local_copy_cpu (const FB& TheFB, int scomp, int ncomp);
     void PC_local_cpu (const CPC& thecpc, FabArray<FAB> const& src,
@@ -942,7 +1067,7 @@ public:
     void CMD_local_setVal_gpu (value_type x, const CommMetaData& thecmd, int scomp, int ncomp);
     void CMD_remote_setVal_gpu (value_type x, const CommMetaData& thecmd, int scomp, int ncomp);
 
-#if ( defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 10))
+#if defined(__CUDACC__)
 
     void FB_local_copy_cuda_graph_1 (const FB& TheFB, int scomp, int ncomp);
     void FB_local_copy_cuda_graph_n (const FB& TheFB, int scomp, int ncomp);
@@ -953,7 +1078,7 @@ public:
 #ifdef AMREX_USE_MPI
 
 #ifdef AMREX_USE_GPU
-#if ( defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 10) )
+#if defined(__CUDACC__)
 
     void FB_pack_send_buffer_cuda_graph (const FB& TheFB, int scomp, int ncomp,
                                          Vector<char*>& send_data,
@@ -968,11 +1093,13 @@ public:
 
 #endif
 
+    template <typename BUF = value_type>
     static void pack_send_buffer_gpu (FabArray<FAB> const& src, int scomp, int ncomp,
                                       Vector<char*> const& send_data,
                                       Vector<std::size_t> const& send_size,
                                       Vector<const CopyComTagsContainer*> const& send_cctc);
 
+    template <typename BUF = value_type>
     static void unpack_recv_buffer_gpu (FabArray<FAB>& dst, int dcomp, int ncomp,
                                         Vector<char*> const& recv_data,
                                         Vector<std::size_t> const& recv_size,
@@ -981,11 +1108,13 @@ public:
 
 #endif
 
+    template <typename BUF = value_type>
     static void pack_send_buffer_cpu (FabArray<FAB> const& src, int scomp, int ncomp,
                                       Vector<char*> const& send_data,
                                       Vector<std::size_t> const& send_size,
                                       Vector<const CopyComTagsContainer*> const& send_cctc);
 
+    template <typename BUF = value_type>
     static void unpack_recv_buffer_cpu (FabArray<FAB>& dst, int dcomp, int ncomp,
                                         Vector<char*> const& recv_data,
                                         Vector<std::size_t> const& recv_size,
@@ -1084,6 +1213,7 @@ public:
 #ifdef BL_USE_MPI
 
     //! Prepost nonblocking receives
+    template <typename BUF=value_type>
     void PostRcvs (const MapOfCopyComTagContainers&       RcvTags,
                    char*&                                 the_recv_data,
                    Vector<char*>&                         recv_data,
@@ -1093,7 +1223,7 @@ public:
                    int                                    ncomp,
                    int                                    SeqNum) const;
 
-
+    template <typename BUF=value_type>
     AMREX_NODISCARD TheFaArenaPointer PostRcvs (const MapOfCopyComTagContainers&       RcvTags,
                    Vector<char*>&                         recv_data,
                    Vector<std::size_t>&                   recv_size,
@@ -1102,6 +1232,7 @@ public:
                    int                                    ncomp,
                    int                                    SeqNum) const;
 
+    template <typename BUF=value_type>
     void PrepareSendBuffers (const MapOfCopyComTagContainers&     SndTags,
                              char*&                               the_send_data,
                              Vector<char*>&                       send_data,
@@ -1111,6 +1242,7 @@ public:
                              Vector<const CopyComTagsContainer*>& send_cctc,
                              int                                  ncomp) const;
 
+    template <typename BUF=value_type>
     AMREX_NODISCARD TheFaArenaPointer PrepareSendBuffers (const MapOfCopyComTagContainers&     SndTags,
                              Vector<char*>&                       send_data,
                              Vector<std::size_t>&                 send_size,
@@ -1129,7 +1261,7 @@ public:
     std::unique_ptr<FBData<FAB>> fbd;
     std::unique_ptr<PCData<FAB>> pcd;
 
-    // Pointer to temporary fab used in non-blocking OverrideSync
+    // Pointer to temporary fab used in non-blocking amrex::OverrideSync
     std::unique_ptr< FabArray<FAB> > os_temp;
 };
 
@@ -1488,8 +1620,16 @@ FabArray<FAB>::setVal (value_type val, const Box& region, const IntVect& nghost)
 }
 
 template <class FAB>
-FabArray<FAB>::FabArray ()
+FabArray<FAB>::FabArray () noexcept
     : shmem()
+{
+    m_FA_stats.recordBuild();
+}
+
+template <class FAB>
+FabArray<FAB>::FabArray (Arena* a) noexcept
+    : m_dallocator(a),
+      shmem()
 {
     m_FA_stats.recordBuild();
 }
@@ -1651,10 +1791,11 @@ FabArray<FAB>::define (const BoxArray&            bxs,
 {
     std::unique_ptr<FabFactory<FAB> > factory(a_factory.clone());
 
+    auto default_arena = m_dallocator.m_arena;
     clear();
 
     m_factory = std::move(factory);
-    m_dallocator.m_arena = info.arena;
+    m_dallocator.m_arena = info.arena ? info.arena : default_arena;
 
     define_function_called = true;
 
@@ -1665,7 +1806,7 @@ FabArray<FAB>::define (const BoxArray&            bxs,
     addThisBD();
 
     if(info.alloc) {
-        AllocFabs(*m_factory, info.arena, info.tags);
+        AllocFabs(*m_factory, m_dallocator.m_arena, info.tags);
         Gpu::synchronize();
 #ifdef BL_USE_TEAM
         ParallelDescriptor::MyTeam().MemoryBarrier();
@@ -2030,36 +2171,11 @@ FabArray<FAB>::setDomainBndry (value_type val,
     }
 }
 
-//
-// Copies to FABs, note that destination is first arg.
-//
-
 template <class FAB>
 void
-FabArray<FAB>::copyTo (FAB& dest,
-                       int  nghost) const
+FabArray<FAB>::copyTo (FAB& dest, int  nghost) const
 {
-    copyTo(dest, dest.box(), 0, 0, dest.nComp(), nghost);
-}
-
-template <class FAB>
-void
-FabArray<FAB>::copyTo (FAB&       dest,
-                       const Box& subbox,
-                       int        nghost) const
-{
-    copyTo(dest, subbox, 0, 0, dest.nComp(), nghost);
-}
-
-template <class FAB>
-void
-FabArray<FAB>::copyTo (FAB& dest,
-                       int  scomp,
-                       int  dcomp,
-                       int  ncomp,
-                       int  nghost) const
-{
-    copyTo(dest, dest.box(), scomp, dcomp, ncomp, nghost);
+    copyTo(dest, 0, 0, dest.nComp(), nghost);
 }
 
 template <class FAB>
@@ -2468,28 +2584,31 @@ FabArray<FAB>::shift (const IntVect& v)
 }
 
 template <class FAB>
+template <typename BUF>
 void
 FabArray<FAB>::FillBoundary (bool cross)
 {
     BL_PROFILE("FabArray::FillBoundary()");
     if ( n_grow.max() > 0 ) {
-        FillBoundary_nowait(0, nComp(), n_grow, Periodicity::NonPeriodic(), cross);
-        FillBoundary_finish();
+        FillBoundary_nowait<BUF>(0, nComp(), n_grow, Periodicity::NonPeriodic(), cross);
+        FillBoundary_finish<BUF>();
     }
 }
 
 template <class FAB>
+template <typename BUF>
 void
 FabArray<FAB>::FillBoundary (const Periodicity& period, bool cross)
 {
     BL_PROFILE("FabArray::FillBoundary()");
     if ( n_grow.max() > 0 ) {
-        FillBoundary_nowait(0, nComp(), n_grow, period, cross);
-        FillBoundary_finish();
+        FillBoundary_nowait<BUF>(0, nComp(), n_grow, period, cross);
+        FillBoundary_finish<BUF>();
     }
 }
 
 template <class FAB>
+template <typename BUF>
 void
 FabArray<FAB>::FillBoundary (const IntVect& nghost, const Periodicity& period, bool cross)
 {
@@ -2497,34 +2616,37 @@ FabArray<FAB>::FillBoundary (const IntVect& nghost, const Periodicity& period, b
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(nghost.allLE(nGrowVect()),
                                      "FillBoundary: asked to fill more ghost cells than we have");
     if ( nghost.max() > 0 ) {
-        FillBoundary_nowait(0, nComp(), nghost, period, cross);
-        FillBoundary_finish();
+        FillBoundary_nowait<BUF>(0, nComp(), nghost, period, cross);
+        FillBoundary_finish<BUF>();
     }
 }
 
 template <class FAB>
+template <typename BUF>
 void
 FabArray<FAB>::FillBoundary (int scomp, int ncomp, bool cross)
 {
     BL_PROFILE("FabArray::FillBoundary()");
     if ( n_grow.max() > 0 ) {
-        FillBoundary_nowait(scomp, ncomp, n_grow, Periodicity::NonPeriodic(), cross);
-        FillBoundary_finish();
+        FillBoundary_nowait<BUF>(scomp, ncomp, n_grow, Periodicity::NonPeriodic(), cross);
+        FillBoundary_finish<BUF>();
     }
 }
 
 template <class FAB>
+template <typename BUF>
 void
 FabArray<FAB>::FillBoundary (int scomp, int ncomp, const Periodicity& period, bool cross)
 {
     BL_PROFILE("FabArray::FillBoundary()");
     if ( n_grow.max() > 0 ) {
-        FillBoundary_nowait(scomp, ncomp, n_grow, period, cross);
-        FillBoundary_finish();
+        FillBoundary_nowait<BUF>(scomp, ncomp, n_grow, period, cross);
+        FillBoundary_finish<BUF>();
     }
 }
 
 template <class FAB>
+template <typename BUF>
 void
 FabArray<FAB>::FillBoundary (int scomp, int ncomp, const IntVect& nghost,
                              const Periodicity& period, bool cross)
@@ -2533,30 +2655,133 @@ FabArray<FAB>::FillBoundary (int scomp, int ncomp, const IntVect& nghost,
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(nghost.allLE(nGrowVect()),
                                      "FillBoundary: asked to fill more ghost cells than we have");
     if ( nghost.max() > 0 ) {
-        FillBoundary_nowait(scomp, ncomp, nghost, period, cross);
-        FillBoundary_finish();
+        FillBoundary_nowait<BUF>(scomp, ncomp, nghost, period, cross);
+        FillBoundary_finish<BUF>();
+    }
+}
+
+template <class FAB>
+template <typename BUF>
+void
+FabArray<FAB>::FillBoundary_nowait (bool cross)
+{
+    FillBoundary_nowait<BUF>(0, nComp(), nGrowVect(), Periodicity::NonPeriodic(), cross);
+}
+
+template <class FAB>
+template <typename BUF>
+void
+FabArray<FAB>::FillBoundary_nowait (const Periodicity& period, bool cross)
+{
+    FillBoundary_nowait<BUF>(0, nComp(), nGrowVect(), period, cross);
+}
+
+template <class FAB>
+template <typename BUF>
+void
+FabArray<FAB>::FillBoundary_nowait (const IntVect& nghost, const Periodicity& period, bool cross)
+{
+    FillBoundary_nowait<BUF>(0, nComp(), nghost, period, cross);
+}
+
+template <class FAB>
+template <typename BUF>
+void
+FabArray<FAB>::FillBoundary_nowait (int scomp, int ncomp, bool cross)
+{
+    FillBoundary_nowait<BUF>(scomp, ncomp, nGrowVect(), Periodicity::NonPeriodic(), cross);
+}
+
+template <class FAB>
+void
+FabArray<FAB>::FillBoundaryAndSync (const Periodicity& period)
+{
+    BL_PROFILE("FAbArray::FillBoundaryAndSync()");
+    if (n_grow.max() > 0 || !is_cell_centered()) {
+        FillBoundaryAndSync_nowait(0, nComp(), n_grow, period);
+        FillBoundaryAndSync_finish();
     }
 }
 
 template <class FAB>
 void
-FabArray<FAB>::FillBoundary_nowait (bool cross)
+FabArray<FAB>::FillBoundaryAndSync (int scomp, int ncomp, const IntVect& nghost,
+                                    const Periodicity& period)
 {
-    FillBoundary_nowait(0, nComp(), nGrowVect(), Periodicity::NonPeriodic(), cross);
+    BL_PROFILE("FAbArray::FillBoundaryAndSync()");
+    if (nghost.max() > 0 || !is_cell_centered()) {
+        FillBoundaryAndSync_nowait(scomp, ncomp, nghost, period);
+        FillBoundaryAndSync_finish();
+    }
 }
 
 template <class FAB>
 void
-FabArray<FAB>::FillBoundary_nowait (const Periodicity& period, bool cross)
+FabArray<FAB>::FillBoundaryAndSync_nowait (const Periodicity& period)
 {
-    FillBoundary_nowait(0, nComp(), nGrowVect(), period, cross);
+    FillBoundaryAndSync_nowait(0, nComp(), nGrowVect(), period);
 }
 
 template <class FAB>
 void
-FabArray<FAB>::FillBoundary_nowait (int scomp, int ncomp, bool cross)
+FabArray<FAB>::FillBoundaryAndSync_nowait (int scomp, int ncomp, const IntVect& nghost,
+                                           const Periodicity& period)
 {
-    FillBoundary_nowait(scomp, ncomp, nGrowVect(), Periodicity::NonPeriodic(), cross);
+    BL_PROFILE("FillBoundaryAndSync_nowait()");
+    FBEP_nowait(scomp, ncomp, nghost, period, false, false, true);
+}
+
+template <class FAB>
+void
+FabArray<FAB>::FillBoundaryAndSync_finish ()
+{
+    BL_PROFILE("FillBoundaryAndSync_finish()");
+    FillBoundary_finish();
+}
+
+template <class FAB>
+void
+FabArray<FAB>::OverrideSync (const Periodicity& period)
+{
+    BL_PROFILE("FAbArray::OverrideSync()");
+    if (!is_cell_centered()) {
+        OverrideSync_nowait(0, nComp(), period);
+        OverrideSync_finish();
+    }
+}
+
+template <class FAB>
+void
+FabArray<FAB>::OverrideSync (int scomp, int ncomp, const Periodicity& period)
+{
+    BL_PROFILE("FAbArray::OverrideSync()");
+    if (!is_cell_centered()) {
+        OverrideSync_nowait(scomp, ncomp, period);
+        OverrideSync_finish();
+    }
+}
+
+template <class FAB>
+void
+FabArray<FAB>::OverrideSync_nowait (const Periodicity& period)
+{
+    OverrideSync_nowait(0, nComp(), period);
+}
+
+template <class FAB>
+void
+FabArray<FAB>::OverrideSync_nowait (int scomp, int ncomp, const Periodicity& period)
+{
+    BL_PROFILE("OverrideSync_nowait()");
+    FBEP_nowait(scomp, ncomp, IntVect(0), period, false, false, true);
+}
+
+template <class FAB>
+void
+FabArray<FAB>::OverrideSync_finish ()
+{
+    BL_PROFILE("OverrideSync_finish()");
+    FillBoundary_finish();
 }
 
 template <class FAB>
@@ -2679,20 +2904,22 @@ FabArray<FAB>::EnforcePeriodicity (int scomp, int ncomp, const IntVect& nghost,
 }
 
 template <class FAB>
+template <typename BUF>
 void
 FabArray<FAB>::FillBoundary_nowait (int scomp, int ncomp, const Periodicity& period, bool cross)
 {
     BL_PROFILE("FillBoundary_nowait()");
-    FBEP_nowait(scomp, ncomp, nGrowVect(), period, cross);
+    FBEP_nowait<BUF>(scomp, ncomp, nGrowVect(), period, cross);
 }
 
 template <class FAB>
+template <typename BUF>
 void
 FabArray<FAB>::FillBoundary_nowait (int scomp, int ncomp, const IntVect& nghost,
                                     const Periodicity& period, bool cross)
 {
     BL_PROFILE("FillBoundary_nowait()");
-    FBEP_nowait(scomp, ncomp, nghost, period, cross);
+    FBEP_nowait<BUF>(scomp, ncomp, nghost, period, cross);
 }
 
 template <class FAB>

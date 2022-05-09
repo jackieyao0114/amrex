@@ -17,6 +17,9 @@ include(AMReXGenerateConfigHeader)  # provides add_amrex_defines
 # Git version
 add_amrex_define( "AMREX_GIT_VERSION=\"${AMREX_GIT_VERSION}\"" NO_LEGACY )
 
+# Release number
+add_amrex_define( "AMREX_RELEASE_NUMBER=${AMREX_RELEASE_NUMBER}" NO_LEGACY )
+
 # XSDK mode
 add_amrex_define( AMREX_XSDK NO_LEGACY IF USE_XSDK_DEFAULTS )
 
@@ -72,6 +75,9 @@ add_amrex_define( AMREX_USE_ASSERTION NO_LEGACY IF AMReX_ASSERTIONS )
 
 # Bound checking
 add_amrex_define( AMREX_BOUND_CHECK NO_LEGACY IF AMReX_BOUND_CHECK )
+
+# Backtraces on macOS
+add_amrex_define( AMREX_EXPORT_DYNAMIC NO_LEGACY IF AMReX_EXPORT_DYNAMIC )
 
 if (AMReX_FORTRAN)
 

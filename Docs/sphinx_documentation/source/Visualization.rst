@@ -38,13 +38,21 @@ Amrvis. Additional information is contained in the document
 
    If you want to build Amrvis with ``DIM=3`` for display of 3-dimensional data,
    you must first download and build ``volpack``. This can be done by cloning
-   the repository:
+   the repository or via package manager. To install by cloning the repository:
 
    .. code-block:: console
 
        git clone https://ccse.lbl.gov/pub/Downloads/volpack.git
 
    After downloading, ``cd`` into ``volpack/`` and type ``make``.
+
+   To install via package manager, it is necessary to install the package,
+   ``libvolpack1-dev``. This package is available for Debian Linux and
+   can be installed with the command:
+
+   .. code-block:: console
+
+      sudo apt install libvolpack1-dev
 
    |
 
@@ -231,7 +239,7 @@ done using the command:
 
 ::
 
-    ~/amrex/Tutorials/Basic/HeatEquation_EX1_C> ls -1 plt*/Header | tee movie.visit
+    ~/amrex-tutorials/ExampleCodes/Basic/HeatEquation_EX1_C> ls -1 plt*/Header | tee movie.visit
     plt00000/Header
     plt01000/Header
     plt02000/Header
@@ -261,6 +269,15 @@ on-screen instructions.
     However, if you do not have ``plt`` followed immediately by the number,
     e.g. you name it ``pltx00100``, then VisIt will not be able to correctly recognize
     and print the value for ``Cycle``.  (It will still read and display the data itself.)
+
+VisIt HDF5 Format
+-----------------
+
+The plotfiles generated with the HDF5 format can be visualized by VisIt as well. To open
+a single plotfile, run VisIt, then select "File" :math:`\rightarrow` "Open file ...",
+then select the HDF5 plotfile of interest (e.g.,``plt00000.h5``), and select "Chombo"
+in the "Open file as type" dropdown menu. VisIt can also recognize the time steps
+automatically based on the numbers in the HDF5 plotfile names in a directory.
 
 .. _section-1:
 
@@ -314,12 +331,18 @@ To open a plotfile (for example, you could run the
 
    \end{center}
 
+Building an Iso-surface
+-----------------------
+
 Note that Paraview is not able to generate iso-surfaces from cell centered data. To build an iso-surface (or iso-line in 2D):
 
 #. Perform a cell to node interpolation: "Filters" :math:`\rightarrow` "Alphabetical" :math:`\rightarrow` "Cell Data to Point Data".
 
 #. Use the "Contour" icon (next to the calculator) to select the data from which to build the contour ("Contour by"), enters the iso-surfaces
    values and click "Apply".
+
+Visualizing Particle Data
+-------------------------
 
 To visualize particle data within plofile directories (for example, you could
 run the `NeighborList`_ example in `Tutorials/Particles`_):
@@ -384,6 +407,58 @@ Once you have loaded an AMReX plotfile time series (fluid and/or particles), you
 
 #. Adjust the resolution, compression and framerate, and click "OK"
 
+Plot a Vector Field
+-------------------
+
+Paraview can be used to plot a vector field from AMR plotfile data. In this example
+we will assume a single vector has been stored as three separate variables,
+``V_x``, ``V_y`` and ``V_z``. The steps below outline a basic construction:
+
+#. Open a plotfile or plotfile group, using ``File`` :math:`\rightarrow` ``Open``.
+   A pop-up will appear, select "AMReX/Boxlib Grid Reader".
+
+#. Select the plotfile or group in the Pipeline Browser. The Cell Array Status
+   window of the Properties should populate with the values ``V_x``, ``V_y``
+   and ``V_z``. Select these values and click apply.
+
+#. Select the Cell Centers filter from ``Filters`` :math:`\rightarrow` ``Alphabetical``
+   :math:`\rightarrow` ``Cell Centers`` and apply.
+
+#. Next we'll define a vector variable using the Calculator filter. Select
+   ``Filters`` :math:`\rightarrow` ``Alphabetical`` :math:`\rightarrow` ``Calculator``.
+   Under the Properties heading, set the Attribute Type to Point Data. The
+   Result Array Name is the name of the vector value we will create. In the
+   line below that we define a new vector value with the equation:
+   ``V_x*iHat + V_y*jHat + V_z*kHat``
+   Note that, the values ``V_x``, ``V_y`` and ``V_z``, should be selectable
+   from the dropdown Scalars menu. Apply the filter.
+
+#. To plot the arrows, select the Glyph filter,
+   ``Filters`` :math:`\rightarrow` ``Alphabetical`` :math:`\rightarrow` ``Glyph``.
+   Under the heading, Glyph Source, select ``Arrow``. Under Orientation, select
+   the name of the vector value created in the last step. The default name is
+   ``Result``. Apply the filter to display the vector field.
+
+   One may want to adjust the appearance of the vector field by scaling each vector
+   by its magnitude. To do this, look under the Scale heading, select the
+   vector value as the Scale Array and select Scale by Magnitude.
+
+   To adjust the number and location of vectors displayed, one may alter the
+   settings under the Masking heading.
+
+.. figure:: ./Visualization/ParaView_vectorfield.png
+   :width: 3.1in
+
+   Vector Field generated with ParaView
+
+ParaView HDF5 Format
+--------------------
+
+The plotfiles generated with the HDF5 format can be visualized by ParaView.
+To open a single plotfile, run VisIt, select "File" :math:`\rightarrow` "Open",
+then select the HDF5 plotfile (e.g.,``plt00000.h5``). You can select an
+individual plotfile or select a group of files to read as time series, then
+click OK. ParaView will ask you about the file type -- choose "VisItChomboReader".
 
 .. _section-2:
 
@@ -908,7 +983,8 @@ simulation will periodically write images during the run.
    ssh cori.nersc.gov
    cd $SCRATCH
    git clone https://github.com/AMReX-Codes/amrex.git
-   cd amrex/Tutorials/Amr/Advection_AmrLevel/Exec/SingleVortex
+   git clone https://github.com/AMReX-Codes/amrex-tutorials.git
+   cd amrex-tutorials/ExampleCodes/Amr/Advection_AmrLevel/Exec/SingleVortex
    module use /usr/common/software/sensei/modulefiles
    module load sensei/2.1.0-catalyst-shared
    source sensei_config
@@ -919,7 +995,7 @@ simulation will periodically write images during the run.
    # sensei.enabled=1
    # sensei.config=sensei/render_iso_catalyst_2d.xml
    salloc -C haswell -N 1 -t 00:30:00 -q debug
-   cd $SCRATCH/amrex/Tutorials/Amr/Advection_AmrLevel/Exec/SingleVortex
+   cd $SCRATCH/amrex-tutorials/ExampleCodes/Amr/Advection_AmrLevel/Exec/SingleVortex
    ./main2d.gnu.haswell.MPI.ex inputs
 
 
@@ -933,7 +1009,8 @@ simulation will periodically write images during the run.
    ssh cori.nersc.gov
    cd $SCRATCH
    git clone https://github.com/AMReX-Codes/amrex.git
-   cd amrex/Tutorials/Amr/Advection_AmrLevel/Exec/SingleVortex
+   git clone https://github.com/AMReX-Codes/amrex-tutorials.git
+   cd amrex-tutorials/ExampleCodes/Amr/Advection_AmrLevel/Exec/SingleVortex
    module use /usr/common/software/sensei/modulefiles
    module load sensei/2.1.0-libsim-shared
    source sensei_config
@@ -944,5 +1021,6 @@ simulation will periodically write images during the run.
    # sensei.enabled=1
    # sensei.config=sensei/render_iso_libsim_2d.xml
    salloc -C haswell -N 1 -t 00:30:00 -q debug
+   cd $SCRATCH/amrex-tutorials/ExampleCodes/Amr/Advection_AmrLevel/Exec/SingleVortex
    ./main2d.gnu.haswell.MPI.ex inputs
 

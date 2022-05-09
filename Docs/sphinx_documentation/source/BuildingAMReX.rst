@@ -17,7 +17,7 @@ Dissecting a Simple Make File
 -----------------------------
 
 An example of building with GNU Make can be found in
-``amrex/Tutorials/Basic/HelloWorld_C``.  :numref:`tab:makevars` below shows a
+``amrex-tutorials/ExampleCodes/Basic/HelloWorld_C``.  :numref:`tab:makevars` below shows a
 list of important variables.
 
 .. raw:: latex
@@ -77,7 +77,7 @@ list of important variables.
 
    \end{center}
 
-At the beginning of ``amrex/Tutorials/Basic/HelloWorld_C/GNUmakefile``,
+At the beginning of ``amrex-tutorials/ExampleCodes/Basic/HelloWorld_C/GNUmakefile``,
 ``AMREX_HOME`` is set to the path to the top directory of AMReX.  Note that in
 the example :cpp:`?=` is a conditional variable assignment operator that only
 has an effect if ``AMREX_HOME`` has not been defined (including in the
@@ -480,6 +480,8 @@ The list of available options is reported in the :ref:`table <tab:cmakevar>` bel
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
    | AMReX_MEM_PROFILE            |  Build with memory-profiling support            | NO                      | YES, NO               |
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
+   | AMReX_TP_PROFILE             |  Third-party profiling options                  | IGNORE                  | CRAYPAT,FORGE,VTUNE   |
+   +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
    | AMReX_TESTING                |  Build for testing --sets MultiFab initial data | NO                      | YES, NO               |
    |                              |  to NaN                                         |                         |                       |
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
@@ -494,6 +496,8 @@ The list of available options is reported in the :ref:`table <tab:cmakevar>` bel
    | AMReX_ASSERTIONS             |  Build with assertions turned on                | NO                      | YES, NO               |
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
    | AMReX_BOUND_CHECK            |  Enable bound checking in Array4 class          | NO                      | YES, NO               |
+   +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
+   | AMReX_EXPORT_DYNAMIC         |  Enable backtrace on macOS                      | NO (unless Darwin)      | YES, NO               |
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
    | AMReX_SENSEI                 |  Enable the SENSEI in situ infrastucture        | NO                      | YES, NO               |
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
@@ -743,3 +747,38 @@ This capability is not supported on Windows.
 (3) Memory profiling is an optional feature in AMReX that is not enabled by default.  It reads
 memory system information from the OS to give us a summary of our memory usage.  This is not
 supported on Windows.
+
+
+.. _sec:build:spack:
+
+Spack
+=====
+
+AMReX can be installed using the scientific software package manager Spack. Spack
+supports multiple versions and configurations of AMReX across a wide variety of platforms
+and environments. To learn more about Spack visit http://www.spack.io. For system requirements and
+installation instructions please see https://spack.readthedocs.io/.
+
+Once Spack has been downloaded and the Spack environment enabled, AMReX can be
+installed with the command,
+
+.. code-block:: bash
+
+   spack install amrex
+
+This will install the latest release of AMReX and required dependencies if needed.
+
+AMReX can be built in several combinations of versions and configurations. Available options can
+be viewed by typing,
+
+.. code-block:: bash
+
+   spack info amrex
+
+For example, suppose we want to install the development version of AMReX for a two dimensional
+simulation with Cuda support for Cuda Architecture ``sm_60``. Then we would
+use the install commands,
+
+.. code-block:: bash
+
+   spack install amrex@develop dimensions=2 +cuda cuda_arch=60

@@ -3,6 +3,7 @@
 #include <AMReX_Config.H>
 
 #include <AMReX_Extension.H>
+#include <vector>
 #include <type_traits>
 
 // In case they are still used by applications
@@ -80,7 +81,7 @@ namespace amrex
     template <class T, class Enable = void>
     struct DefinitelyNotHostRunnable : std::false_type {};
 
-#if defined(AMREX_USE_CUDA)
+#if defined(AMREX_USE_CUDA) && defined(__NVCC__)
 
     template <class T>
     struct MaybeHostDeviceRunnable<T, std::enable_if_t<__nv_is_extended_device_lambda_closure_type(T)> >
@@ -227,6 +228,15 @@ namespace amrex
                                 std::is_arithmetic<T>::value
                                 && sizeof(T) <= 8 >::type >
         : std::true_type {};
+
+    template <class T, class Enable = void>
+    struct IsStdVector : std::false_type {};
+    //
+    template <class T>
+    struct IsStdVector<T, std::enable_if_t<std::is_base_of<std::vector<typename T::value_type,
+                                                                       typename T::allocator_type>,
+                                                           T>::value> >
+                       : std::true_type {};
 
 }
 

@@ -11,6 +11,7 @@
 #include <AMReX_BoxList.H>
 #include <AMReX_BArena.H>
 #include <AMReX_CArena.H>
+#include <AMReX_DataAllocator.H>
 #include <AMReX_REAL.H>
 #include <AMReX_BLProfiler.H>
 #include <AMReX_BoxIterator.H>
@@ -177,34 +178,6 @@ placementDelete (T* const ptr, Long n)
     });
 }
 
-struct DataAllocator {
-    Arena* m_arena = nullptr;
-
-    DataAllocator ()  noexcept : m_arena(nullptr) {}
-
-    DataAllocator (Arena* ar) noexcept : m_arena(ar) {}
-
-    void* alloc (std::size_t sz) const noexcept {
-        return arena()->alloc(sz);
-    }
-
-    void free (void* pt) const noexcept {
-        arena()->free(pt);
-    }
-
-    Arena* arena () const noexcept {
-        return (m_arena) ? m_arena : The_Arena();
-    }
-};
-
-struct DataDeleter {
-    Arena* m_arena = nullptr;
-    DataDeleter () noexcept : m_arena(nullptr) {}
-    DataDeleter (Arena* ar) noexcept : m_arena(ar) {}
-    Arena* arena () const noexcept { return (m_arena) ? m_arena : The_Arena(); }
-    void operator() (void* pt) const noexcept { arena()->free(pt); }
-};
-
 template <class T>
 class BaseFab
     : public DataAllocator
@@ -249,9 +222,9 @@ public:
 
     BaseFab (const BaseFab<T>& rhs) = delete;
     BaseFab<T>& operator= (const BaseFab<T>& rhs) = delete;
-    BaseFab<T>& operator= (BaseFab<T>&& rhs) = delete;
 
     BaseFab (BaseFab<T>&& rhs) noexcept;
+    BaseFab<T>& operator= (BaseFab<T>&& rhs) noexcept;
 
 #if defined(AMREX_USE_GPU)
     template <RunOn run_on>
@@ -580,18 +553,18 @@ public:
 
     //! Copy from raw memory to the dstbox of this Fab and return the number of bytes copied
 #if defined(AMREX_USE_GPU)
-    template <RunOn run_on>
+    template <RunOn run_on, typename BUF = T>
 #else
-    template <RunOn run_on=RunOn::Host>
+    template <RunOn run_on=RunOn::Host, typename BUF = T>
 #endif
     std::size_t copyFromMem (const Box& dstbox, int dstcomp,
                              int numcomp, const void* src) noexcept;
 
     //! Add from raw memory to the dstbox of this Fab and return the number of bytes copied
 #if defined(AMREX_USE_GPU)
-    template <RunOn run_on>
+    template <RunOn run_on, typename BUF = T>
 #else
-    template <RunOn run_on=RunOn::Host>
+    template <RunOn run_on=RunOn::Host, typename BUF = T>
 #endif
     std::size_t addFromMem (const Box& dstbox, int dstcomp,
                             int numcomp, const void* src) noexcept;
@@ -1909,12 +1882,7 @@ BaseFab<T>::define ()
 {
     AMREX_ASSERT(this->dptr == 0);
     AMREX_ASSERT(this->domain.numPts() > 0);
-#if !defined(__CUDACC__) || (__CUDACC_VER_MAJOR__ != 9) || (__CUDACC_VER_MINOR__ != 2)
     AMREX_ASSERT(std::numeric_limits<Long>::max()/this->nvar > this->domain.numPts());
-#else
-    AMREX_ASSERT(LONG_MAX/this->nvar > this->domain.numPts());
-#endif
-
     AMREX_ASSERT(this->nvar >= 0);
     if (this->nvar == 0) return;
 
@@ -2029,6 +1997,26 @@ BaseFab<T>::BaseFab (BaseFab<T>&& rhs) noexcept
 {
     rhs.dptr = nullptr;
     rhs.ptr_owner = false;
+}
+
+template <class T>
+BaseFab<T>&
+BaseFab<T>::operator= (BaseFab<T>&& rhs) noexcept
+{
+    if (this != &rhs) {
+        clear();
+        DataAllocator::operator=(rhs);
+        dptr = rhs.dptr;
+        domain = rhs.domain;
+        nvar = rhs.nvar;
+        truesize = rhs.truesize;
+        ptr_owner = rhs.ptr_owner;
+        shared_memory = rhs.shared_memory;
+
+        rhs.dptr = nullptr;
+        rhs.ptr_owner = false;
+    }
+    return *this;
 }
 
 template <class T>
@@ -2174,7 +2162,7 @@ BaseFab<T>::copyToMem (const Box& srcbox,
 }
 
 template <class T>
-template <RunOn run_on>
+template <RunOn run_on, typename BUF>
 std::size_t
 BaseFab<T>::copyFromMem (const Box&  dstbox,
                          int         dstcomp,
@@ -2186,14 +2174,14 @@ BaseFab<T>::copyFromMem (const Box&  dstbox,
 
     if (dstbox.ok())
     {
-        Array4<T const> s(static_cast<T const*>(src), amrex::begin(dstbox),
-                          amrex::end(dstbox), numcomp);
+        Array4<BUF const> s(static_cast<BUF const*>(src), amrex::begin(dstbox),
+                            amrex::end(dstbox), numcomp);
         Array4<T> const& d = this->array();
         AMREX_HOST_DEVICE_PARALLEL_FOR_4D_FLAG(run_on, dstbox, numcomp, i, j, k, n,
         {
-            d(i,j,k,n+dstcomp) = s(i,j,k,n);
+            d(i,j,k,n+dstcomp) = static_cast<T>(s(i,j,k,n));
         });
-        return sizeof(T)*s.size();
+        return sizeof(BUF)*s.size();
     }
     else
     {
@@ -2202,7 +2190,7 @@ BaseFab<T>::copyFromMem (const Box&  dstbox,
 }
 
 template <class T>
-template <RunOn run_on>
+template <RunOn run_on, typename BUF>
 std::size_t
 BaseFab<T>::addFromMem (const Box&  dstbox,
                         int         dstcomp,
@@ -2214,14 +2202,14 @@ BaseFab<T>::addFromMem (const Box&  dstbox,
 
     if (dstbox.ok())
     {
-        Array4<T const> s(static_cast<T const*>(src), amrex::begin(dstbox),
-                          amrex::end(dstbox), numcomp);
+        Array4<BUF const> s(static_cast<BUF const*>(src), amrex::begin(dstbox),
+                            amrex::end(dstbox), numcomp);
         Array4<T> const& d = this->array();
         AMREX_HOST_DEVICE_PARALLEL_FOR_4D_FLAG(run_on, dstbox, numcomp, i, j, k, n,
         {
-            d(i,j,k,n+dstcomp) += s(i,j,k,n);
+            d(i,j,k,n+dstcomp) += static_cast<T>(s(i,j,k,n));
         });
-        return sizeof(T)*s.size();
+        return sizeof(BUF)*s.size();
     }
     else
     {

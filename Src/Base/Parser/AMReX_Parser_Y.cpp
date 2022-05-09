@@ -100,7 +100,7 @@ parser_newf3 (enum parser_f3_t ftype, struct parser_node* n1, struct parser_node
 struct parser_node*
 parser_newassign (struct parser_symbol* sym, struct parser_node* v)
 {
-    auto r = (struct parser_assign*) std::malloc(sizeof(struct parser_symbol));
+    auto r = (struct parser_assign*) std::malloc(sizeof(struct parser_assign));
     r->type = PARSER_ASSIGN;
     r->s = sym;
     r->v = v;
@@ -1256,6 +1256,9 @@ parser_ast_print_f2 (struct parser_f2* f2, std::string const& space, AllPrint& p
         break;
     case PARSER_MAX:
         printer << "MAX\n";
+        break;
+    case PARSER_FMOD:
+        printer << "FMOD\n";
         break;
     default:
         amrex::AllPrint() << "parser_ast_print_f2: Unknown function " << f2->ftype << "\n";

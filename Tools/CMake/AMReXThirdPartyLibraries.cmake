@@ -4,7 +4,7 @@
 if (AMReX_HDF5)
     set(HDF5_PREFER_PARALLEL TRUE)
     find_package(HDF5 1.10.4 REQUIRED)
-    if (NOT HDF5_IS_PARALLEL)
+    if (AMReX_MPI AND (NOT HDF5_IS_PARALLEL))
         message(FATAL_ERROR "\nHDF5 library does not support parallel I/O")
      endif ()
 
@@ -57,7 +57,7 @@ endif ()
 # HYPRE
 #
 if (AMReX_HYPRE)
-    find_package(HYPRE 2.21.0 REQUIRED)
+    find_package(HYPRE 2.20.0 REQUIRED)
     if(AMReX_CUDA)
         find_package(CUDAToolkit REQUIRED)
         target_link_libraries(amrex PUBLIC CUDA::cusparse CUDA::curand)
@@ -78,7 +78,12 @@ endif ()
 # SUNDIALS
 #
 if (AMReX_SUNDIALS)
-    find_package(SUNDIALS 5.7.0 REQUIRED)
+    if (SUNDIALS_FOUND)
+        message(STATUS "SUNDIALS_FOUND is true, assuming nvecserial or gpu-specific vector found for version 6.0.0 or higher")
+    else ()
+       set(SUNDIALS_MINIMUM_VERSION 6.0.0 CACHE INTERNAL "Minimum required SUNDIALS version")
+       find_package(SUNDIALS ${SUNDIALS_MINIMUM_VERSION} CONFIG QUIET )
+    endif ()
     if (AMReX_GPU_BACKEND STREQUAL "CUDA")
        target_link_libraries( amrex PUBLIC SUNDIALS::nveccuda)
     elseif (AMReX_GPU_BACKEND STREQUAL "HIP")

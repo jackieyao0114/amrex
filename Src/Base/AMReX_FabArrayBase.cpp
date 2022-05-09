@@ -23,6 +23,7 @@
 #endif
 
 #include <algorithm>
+#include <utility>
 
 namespace amrex {
 
@@ -116,7 +117,7 @@ FabArrayBase::Initialize ()
         for (int i=0; i<AMREX_SPACEDIM; i++) FabArrayBase::comm_tile_size[i] = tilesize[i];
     }
 
-    pp.query("maxcomp",             FabArrayBase::MaxComp);
+    pp.queryAdd("maxcomp",             FabArrayBase::MaxComp);
 
     if (MaxComp < 1) {
         MaxComp = 1;
@@ -296,12 +297,13 @@ FabArrayBase::TileArray::bytes () const
 
 FabArrayBase::CPC::CPC (const FabArrayBase& dstfa, const IntVect& dstng,
                         const FabArrayBase& srcfa, const IntVect& srcng,
-                        const Periodicity& period)
+                        const Periodicity& period, bool to_ghost_cells_only)
     : m_srcbdk(srcfa.getBDKey()),
       m_dstbdk(dstfa.getBDKey()),
       m_srcng(srcng),
       m_dstng(dstng),
       m_period(period),
+      m_tgco(to_ghost_cells_only),
       m_srcba(srcfa.boxArray()),
       m_dstba(dstfa.boxArray()),
       m_nuse(0)
@@ -320,6 +322,7 @@ FabArrayBase::CPC::CPC (const BoxArray& dstba, const DistributionMapping& dstdm,
       m_srcng(srcng),
       m_dstng(dstng),
       m_period(period),
+      m_tgco(false),
       m_srcba(srcba),
       m_dstba(dstba),
       m_nuse(0)
@@ -377,7 +380,10 @@ FabArrayBase::CPC::define (const BoxArray& ba_dst, const DistributionMapping& dm
                     if (ParallelDescriptor::sameTeam(dst_owner)) {
                         continue; // local copy will be dealt with later
                     } else if (MyProc == dm_src[k_src]) {
-                        send_tags[dst_owner].push_back(CopyComTag(bx, bx-(*pit), k_dst, k_src));
+                        BoxList const bl_dst = m_tgco ? boxDiff(bx, ba_dst[k_dst]) : BoxList(bx);
+                        for (auto const& b : bl_dst) {
+                            send_tags[dst_owner].push_back(CopyComTag(b, b-(*pit), k_dst, k_src));
+                        }
                     }
                 }
             }
@@ -406,7 +412,8 @@ FabArrayBase::CPC::define (const BoxArray& ba_dst, const DistributionMapping& dm
         for (int i = 0; i < nlocal_dst; ++i)
         {
             const int   k_dst = imap_dst[i];
-            const Box& bx_dst = amrex::grow(ba_dst[k_dst], ng_dst);
+            const Box& bx_dst_valid = ba_dst[k_dst];
+            const Box& bx_dst = amrex::grow(bx_dst_valid, ng_dst);
 
             for (std::vector<IntVect>::const_iterator pit=pshifts.begin(); pit!=pshifts.end(); ++pit)
             {
@@ -418,21 +425,21 @@ FabArrayBase::CPC::define (const BoxArray& ba_dst, const DistributionMapping& dm
                     const Box& bx       = isects[j].second - *pit;
                     const int src_owner = dm_src[k_src];
 
-                    if (ParallelDescriptor::sameTeam(src_owner, MyProc)) { // local copy
-                        const BoxList tilelist(bx, FabArrayBase::comm_tile_size);
-                        for (BoxList::const_iterator
-                                 it_tile  = tilelist.begin(),
-                                 End_tile = tilelist.end();   it_tile != End_tile; ++it_tile)
-                        {
-                            m_LocTags->push_back(CopyComTag(*it_tile, (*it_tile)+(*pit), k_dst, k_src));
-                        }
-                        if (check_local) {
-                            bl_local.push_back(bx);
-                        }
-                    } else if (MyProc == dm_dst[k_dst]) {
-                        recv_tags[src_owner].push_back(CopyComTag(bx, bx+(*pit), k_dst, k_src));
-                        if (check_remote) {
-                            bl_remote.push_back(bx);
+                    BoxList const bl_dst = m_tgco ? boxDiff(bx,bx_dst_valid) : BoxList(bx);
+                    for (auto const& b : bl_dst) {
+                        if (ParallelDescriptor::sameTeam(src_owner, MyProc)) { // local copy
+                            const BoxList tilelist(b, FabArrayBase::comm_tile_size);
+                            for (auto const& btile : tilelist) {
+                                m_LocTags->push_back(CopyComTag(btile, btile+(*pit), k_dst, k_src));
+                            }
+                            if (check_local) {
+                                bl_local.push_back(b);
+                            }
+                        } else if (MyProc == dm_dst[k_dst]) {
+                            recv_tags[src_owner].push_back(CopyComTag(b, b+(*pit), k_dst, k_src));
+                            if (check_remote) {
+                                bl_remote.push_back(b);
+                            }
                         }
                     }
                 }
@@ -471,6 +478,7 @@ FabArrayBase::CPC::CPC (const BoxArray& ba, const IntVect& ng,
       m_srcng(ng),
       m_dstng(ng),
       m_period(),
+      m_tgco(false),
       m_srcba(ba),
       m_dstba(ba),
       m_nuse(0)
@@ -555,12 +563,16 @@ FabArrayBase::flushCPC (bool no_assertion) const
 void
 FabArrayBase::flushCPCache ()
 {
+    std::vector<CPC*> cpcs;
     for (CPCacheIter it = m_TheCPCache.begin(); it != m_TheCPCache.end(); ++it)
     {
         if (it->first == it->second->m_srcbdk) {
             m_CPC_stats.recordErase(it->second->m_nuse);
-            delete it->second;
+            cpcs.push_back(it->second);
         }
+    }
+    for (auto& c : cpcs) {
+        delete c;
     }
     m_TheCPCache.clear();
 #ifdef AMREX_MEM_PROFILING
@@ -569,7 +581,8 @@ FabArrayBase::flushCPCache ()
 }
 
 const FabArrayBase::CPC&
-FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVect& srcng, const Periodicity& period) const
+FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVect& srcng,
+                      const Periodicity& period, bool to_ghost_cells_only) const
 {
     BL_PROFILE("FabArrayBase::getCPC()");
 
@@ -589,6 +602,7 @@ FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVe
             it->second->m_srcbdk == srckey &&
             it->second->m_dstbdk == dstkey &&
             it->second->m_period == period &&
+            it->second->m_tgco   == to_ghost_cells_only &&
             it->second->m_srcba  == src.boxArray() &&
             it->second->m_dstba  == boxArray())
         {
@@ -599,7 +613,7 @@ FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVe
     }
 
     // Have to build a new one
-    CPC* new_cpc = new CPC(*this, dstng, src, srcng, period);
+    CPC* new_cpc = new CPC(*this, dstng, src, srcng, period, to_ghost_cells_only);
 
 #ifdef AMREX_MEM_PROFILING
     m_CPC_stats.bytes += new_cpc->bytes();
@@ -611,8 +625,9 @@ FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVe
     m_CPC_stats.recordUse();
 
     m_TheCPCache.insert(er_it.second, CPCache::value_type(dstkey,new_cpc));
-    if (srckey != dstkey)
+    if (srckey != dstkey) {
         m_TheCPCache.insert(          CPCache::value_type(srckey,new_cpc));
+    }
 
     return *new_cpc;
 }
@@ -623,11 +638,11 @@ FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVe
 
 FabArrayBase::FB::FB (const FabArrayBase& fa, const IntVect& nghost,
                       bool cross, const Periodicity& period,
-                      bool enforce_periodicity_only,
+                      bool enforce_periodicity_only, bool override_sync,
                       bool multi_ghost)
     : m_typ(fa.boxArray().ixType()), m_crse_ratio(fa.boxArray().crseRatio()),
-      m_ngrow(nghost), m_cross(cross),
-      m_epo(enforce_periodicity_only), m_period(period),
+      m_ngrow(nghost), m_cross(cross), m_epo(enforce_periodicity_only),
+      m_override_sync(override_sync),  m_period(period),
       m_nuse(0), m_multi_ghost(multi_ghost)
 {
     BL_PROFILE("FabArrayBase::FB::FB()");
@@ -640,6 +655,9 @@ FabArrayBase::FB::FB (const FabArrayBase& fa, const IntVect& nghost,
         if (enforce_periodicity_only) {
             BL_ASSERT(m_cross==false);
             define_epo(fa);
+        } else if (override_sync) {
+            BL_ASSERT(m_cross==false);
+            define_os(fa);
         } else {
             define_fb(fa);
         }
@@ -1016,6 +1034,141 @@ FabArrayBase::FB::define_epo (const FabArrayBase& fa)
     }
 }
 
+void FabArrayBase::FB::tag_one_box (int krcv, BoxArray const& ba, DistributionMapping const& dm,
+                                    bool build_recv_tag)
+{
+    Box const& vbx = ba[krcv];
+    Box const& gbx = amrex::grow(vbx, m_ngrow);
+    IndexType const ixtype = vbx.ixType();
+
+    std::vector<std::pair<int,Box> > isects2;
+    std::vector<std::tuple<int,Box,IntVect> > isects3;
+    auto const& pshifts = m_period.shiftIntVect();
+    for (auto const& shft: pshifts) {
+        ba.intersections(gbx+shft, isects2);
+        for (auto const& is2 : isects2) {
+            if (is2.first != krcv || shft != 0) {
+                isects3.emplace_back(is2.first, is2.second-shft, shft);
+            }
+        }
+    }
+
+    int const dst_owner = dm[krcv];
+    bool const is_receiver = dst_owner == ParallelDescriptor::MyProc();
+
+    BoxList bl(ixtype);
+    BoxList tmpbl(ixtype);
+    for (auto const& is3 : isects3) {
+        int const      ksnd = std::get<int>(is3);
+        Box const&   dst_bx = std::get<Box>(is3);
+        IntVect const& shft = std::get<IntVect>(is3); // src = dst + shft
+        int const src_owner = dm[ksnd];
+        bool is_sender = src_owner == ParallelDescriptor::MyProc();
+
+        if ((build_recv_tag && (ParallelDescriptor::sameTeam(src_owner) || is_receiver))
+            || (is_sender && !ParallelDescriptor::sameTeam(dst_owner)))
+        {
+            bl.clear();
+            tmpbl.clear();
+
+            if (ksnd < krcv || (ksnd == krcv && shft < IntVect::TheZeroVector())) {
+                bl.push_back(dst_bx); // valid cells are allowed to override valid cells
+            } else {
+                bl = boxDiff(dst_bx, vbx); // exclude valid cells
+            }
+
+            for (auto const& o_is3 : isects3) {
+                int const      o_ksnd = std::get<int>(o_is3);
+                IntVect const& o_shft = std::get<IntVect>(o_is3);
+                Box const&   o_dst_bx = std::get<Box>(o_is3);
+                if ((o_ksnd < ksnd || (o_ksnd == ksnd && o_shft < shft))
+                    && o_dst_bx.intersects(dst_bx))
+                {
+                    for (auto const& b : bl) {
+                        tmpbl.join(boxDiff(b, o_dst_bx));
+                    }
+                    std::swap(bl, tmpbl);
+                    tmpbl.clear();
+                }
+            }
+
+            if (build_recv_tag) {
+                if (ParallelDescriptor::sameTeam(src_owner)) { // local copy
+                    for (auto const& b : bl) {
+                        const BoxList tilelist(b, FabArrayBase::comm_tile_size);
+                        for (auto const& tbx : tilelist) {
+                            m_LocTags->emplace_back(tbx, tbx+shft, krcv, ksnd);
+                        }
+                    }
+                } else if (is_receiver) {
+                    for (auto const& b : bl) {
+                        (*m_RcvTags)[src_owner].emplace_back(b, b+shft, krcv, ksnd);
+                    }
+                }
+            } else if (is_sender && !ParallelDescriptor::sameTeam(dst_owner))  {
+                for (auto const& b : bl) {
+                    (*m_SndTags)[dst_owner].emplace_back(b, b+shft, krcv, ksnd);
+                }
+            }
+        }
+    }
+
+
+}
+
+void
+FabArrayBase::FB::define_os (const FabArrayBase& fa)
+{
+    m_threadsafe_loc = true;
+    m_threadsafe_rcv = true;
+
+    const BoxArray&            ba       = fa.boxArray();
+    const DistributionMapping& dm       = fa.DistributionMap();
+    const Vector<int>&         imap     = fa.IndexArray();
+    const int nlocal = imap.size();
+
+    for (int i = 0; i < nlocal; ++i)
+    {
+        tag_one_box(imap[i], ba, dm, true);
+    }
+
+#ifdef AMREX_USE_MPI
+    if (ParallelDescriptor::NProcs() > 1) {
+        const std::vector<IntVect>& pshifts = m_period.shiftIntVect();
+        std::vector< std::pair<int,Box> > isects;
+
+        std::set<int> my_receiver;
+        for (int i = 0; i < nlocal; ++i) {
+            int const ksnd = imap[i];
+            Box const& vbx = ba[ksnd];
+            for (auto const& shft : pshifts) {
+                ba.intersections(vbx+shft, isects, false, m_ngrow);
+                for (auto const& is : isects) {
+                    if (is.first != ksnd || shft != 0) {
+                        my_receiver.insert(is.first);
+                    }
+                }
+            }
+        }
+
+        // Unlike normal FillBoundary, we have to build the send tags
+        // differently.  This is because (b1 \ b2) \ b3 might produce
+        // different BoxList than (b1 \ b3) \ b2, not just in the order of
+        // Boxes in BoxList that can be fixed by sorting.  To make sure the
+        // send tags on the sender process matches the recv tags on the
+        // receiver process, we make the sender to use the same procedure to
+        // build tags as the receiver.
+
+        for (auto const& krcv : my_receiver) {
+            tag_one_box(krcv, ba, dm, false);
+        }
+    }
+#endif
+
+    // No need to sort send and recv tags because they are already sorted
+    // due to the way they are built.
+}
+
 FabArrayBase::FB::~FB ()
 {}
 
@@ -1052,7 +1205,8 @@ FabArrayBase::flushFBCache ()
 
 const FabArrayBase::FB&
 FabArrayBase::getFB (const IntVect& nghost, const Periodicity& period,
-                     bool cross, bool enforce_periodicity_only) const
+                     bool cross, bool enforce_periodicity_only,
+                     bool override_sync) const
 {
     BL_PROFILE("FabArrayBase::getFB()");
 
@@ -1066,6 +1220,7 @@ FabArrayBase::getFB (const IntVect& nghost, const Periodicity& period,
             it->second->m_cross      == cross                    &&
             it->second->m_multi_ghost== m_multi_ghost            &&
             it->second->m_epo        == enforce_periodicity_only &&
+            it->second->m_override_sync == override_sync         &&
             it->second->m_period     == period              )
         {
             ++(it->second->m_nuse);
@@ -1075,7 +1230,8 @@ FabArrayBase::getFB (const IntVect& nghost, const Periodicity& period,
     }
 
     // Have to build a new one
-    FB* new_fb = new FB(*this, nghost, cross, period, enforce_periodicity_only,m_multi_ghost);
+    FB* new_fb = new FB(*this, nghost, cross, period, enforce_periodicity_only,
+                        override_sync, m_multi_ghost);
 
 #ifdef AMREX_MEM_PROFILING
     m_FBC_stats.bytes += new_fb->bytes();
@@ -1781,7 +1937,7 @@ FabArrayBase::FPinfo::FPinfo (const FabArrayBase& srcfa,
                                            ba_crse_patch,
                                            dm_patch,
                                            {0,0,0}, EBSupport::basic);
-        int ng = boxtype.cellCentered() ? 0 : 1; // to avoid dengerate box
+        int ng = 1; // to avoid dengerate box
         fact_fine_patch = makeEBFabFactory(index_space,
                                            index_space->getGeometry(fdomain),
                                            ba_fine_patch,
@@ -2484,8 +2640,7 @@ FabArrayBase::isFusingCandidate () const noexcept
 #ifdef AMREX_USE_GPU
 
 FabArrayBase::ParForInfo::ParForInfo (const FabArrayBase& fa, const IntVect& nghost, int nthreads)
-    : m_typ(fa.boxArray().ixType()),
-      m_crse_ratio(fa.boxArray().crseRatio()),
+    : m_bat(fa.boxArray().transformer()),
       m_ng(nghost),
       m_nthreads(nthreads),
       m_nblocks_x({nullptr,nullptr})
@@ -2517,8 +2672,7 @@ FabArrayBase::getParForInfo (const IntVect& nghost, int nthreads) const
     AMREX_ASSERT(getBDKey() == m_bdkey);
     auto er_it = m_TheParForCache.equal_range(m_bdkey);
     for (auto it = er_it.first; it != er_it.second; ++it) {
-        if (it->second->m_typ        == boxArray().ixType()    &&
-            it->second->m_crse_ratio == boxArray().crseRatio() &&
+        if (it->second->m_bat        == boxArray().transformer() &&
             it->second->m_ng         == nghost                 &&
             it->second->m_nthreads   == nthreads)
         {
@@ -2537,7 +2691,6 @@ FabArrayBase::flushParForInfo (bool no_assertion) const
 {
     amrex::ignore_unused(no_assertion);
     AMREX_ASSERT(no_assertion || getBDKey() == m_bdkey);
-    AMREX_ASSERT(getBDKey() == m_bdkey);
     auto er_it = m_TheParForCache.equal_range(m_bdkey);
     for (auto it = er_it.first; it != er_it.second; ++it) {
         delete it->second;

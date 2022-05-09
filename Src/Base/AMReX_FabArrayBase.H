@@ -489,7 +489,8 @@ public:
     {
         FB (const FabArrayBase& fa, const IntVect& nghost,
             bool cross, const Periodicity& period,
-            bool enforce_periodicity_only, bool multi_ghost = false);
+            bool enforce_periodicity_only, bool override_sync,
+            bool multi_ghost);
         ~FB ();
 
         IndexType    m_typ;
@@ -497,12 +498,13 @@ public:
         IntVect      m_ngrow;
         bool         m_cross;
         bool         m_epo;
+        bool         m_override_sync;
         Periodicity  m_period;
         //
         Long         m_nuse;
         bool         m_multi_ghost = false;
         //
-#if ( defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 10) )
+#if defined(__CUDACC__)
         CudaGraph<CopyMemory> m_localCopy;
         CudaGraph<CopyMemory> m_copyToBuffer;
         CudaGraph<CopyMemory> m_copyFromBuffer;
@@ -512,6 +514,9 @@ public:
     private:
         void define_fb (const FabArrayBase& fa);
         void define_epo (const FabArrayBase& fa);
+        void define_os (const FabArrayBase& fa);
+        void tag_one_box (int krcv, BoxArray const& ba, DistributionMapping const& dm,
+                          bool build_recv_tag);
     };
     //
     typedef std::multimap<BDKey,FabArrayBase::FB*> FBCache;
@@ -521,7 +526,8 @@ public:
     static CacheStats m_FBC_stats;
     //
     const FB& getFB (const IntVect& nghost, const Periodicity& period,
-                     bool cross=false, bool enforce_periodicity_only = false) const;
+                     bool cross=false, bool enforce_periodicity_only = false,
+                     bool override_sync = false) const;
     //
     void flushFB (bool no_assertion=false) const;       //!< This flushes its own FB.
     static void flushFBCache (); //!< This flushes the entire cache.
@@ -533,7 +539,7 @@ public:
     {
         CPC (const FabArrayBase& dstfa, const IntVect& dstng,
              const FabArrayBase& srcfa, const IntVect& srcng,
-             const Periodicity& period);
+             const Periodicity& period, bool to_ghost_cells_only = false);
         CPC (const BoxArray& dstba, const DistributionMapping& dstdm,
              const Vector<int>& dstidx, const IntVect& dstng,
              const BoxArray& srcba, const DistributionMapping& srcdm,
@@ -550,6 +556,7 @@ public:
         IntVect     m_srcng;
         IntVect     m_dstng;
         Periodicity m_period;
+        bool        m_tgco;
         BoxArray    m_srcba;
         BoxArray    m_dstba;
         //
@@ -571,7 +578,7 @@ public:
     static CacheStats m_CPC_stats;
     //
     const CPC& getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVect& srcng,
-                       const Periodicity& period) const;
+                       const Periodicity& period, bool to_ghost_cells_only = false) const;
     //
     void flushCPC (bool no_assertion=false) const;      //!< This flushes its own CPC.
     static void flushCPCache (); //!< This flusheds the entire cache.
@@ -662,8 +669,7 @@ public:
         void operator= (ParForInfo const&) = delete;
         void operator= (ParForInfo &&) = delete;
 
-        IndexType m_typ;
-        IntVect m_crse_ratio;
+        BATransformer m_bat;
         IntVect m_ng;
         int m_nthreads;
         std::pair<int*,int*> m_nblocks_x;
