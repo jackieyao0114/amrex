@@ -143,7 +143,9 @@ main (int   argc,
             for (auto k = lo.z; k <= hi.z; ++k) {
               for (auto j = lo.y; j <= hi.y; ++j) {
                 for (auto i = lo.x; i <= hi.x; ++i) {
-                  std::cout << i << " " << j << " " << k << " " << n << " " << mfdata(i,j,k,n) << "\n";
+                  if (i == 32 && k == 27) {
+                    std::cout << i << " " << j << " " << k << " " << n << " " << mfdata(i,j,k,n) << "\n";
+                  }
                 }
               }
             }
