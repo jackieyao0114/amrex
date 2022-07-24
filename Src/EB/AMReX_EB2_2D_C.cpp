@@ -31,30 +31,21 @@ void set_eb_data (const int i, const int j,
     const Real nxabs = amrex::Math::abs(nx);
     const Real nyabs = amrex::Math::abs(ny);
 
-    Real x_ym;
-    Real x_yp;
-    Real signx;
-    Real y_xm;
-    Real y_xp;
-    Real signy;
+    Real x_ym, x_yp, y_xm, y_xp;
     if (nx > 0.0_rt) {
         x_ym = -0.5_rt + aym;
         x_yp = -0.5_rt + ayp;
-        signx = 1.0_rt;
     } else {
         x_ym = 0.5_rt - aym;
         x_yp = 0.5_rt - ayp;
-        signx = -1.0_rt;
     }
 
     if (ny > 0.0_rt) {
         y_xm = -0.5_rt + axm;
         y_xp = -0.5_rt + axp;
-        signy = 1.0_rt;
     } else {
         y_xm = 0.5_rt - axm;
         y_xp = 0.5_rt - axp;
-        signy = -1.0_rt;
     }
 
     barea(i,j,0) = nx*(axm-axp) + ny*(aym-ayp);
@@ -64,20 +55,20 @@ void set_eb_data (const int i, const int j,
     bnorm(i,j,0,1) = ny;
 
     if (nxabs < tiny || nyabs > almostone) {
-        barea(i,j,0) = 1.0_rt;
-        bcent(i,j,0,0) = 0.0_rt;
-        bnorm(i,j,0,0) = 0.0_rt;
-        bnorm(i,j,0,1) = signy;
         vfrac(i,j,0) = 0.5_rt*(axm+axp);
         vcent(i,j,0,0) = 0.0_rt;
-        vcent(i,j,0,1) = (0.125_rt*(ayp-aym) + ny*0.5_rt*bcent(i,j,0,1)*bcent(i,j,0,1)) / (vfrac(i,j,0) + 1.e-30_rt);
+        if (vfrac(i,j,0) > almostone) {
+            vcent(i,j,0,1) = 0.0_rt;
+        } else {
+            vcent(i,j,0,1) = (0.125_rt*(ayp-aym) + ny*0.5_rt*bcent(i,j,0,1)*bcent(i,j,0,1)) / (vfrac(i,j,0) + 1.e-30_rt);
+        }
     } else if (nyabs < tiny || nxabs > almostone) {
-        barea(i,j,0) = 1.0_rt;
-        bcent(i,j,0,1) = 0.0_rt;
-        bnorm(i,j,0,0) = signx;
-        bnorm(i,j,0,1) = 0.0_rt;
         vfrac(i,j,0) = 0.5_rt*(aym+ayp);
-        vcent(i,j,0,0) = (0.125_rt*(axp-axm) + nx*0.5_rt*bcent(i,j,0,0)*bcent(i,j,0,0)) / (vfrac(i,j,0) + 1.e-30_rt);
+        if (vfrac(i,j,0) > almostone) {
+            vcent(i,j,0,0) = 0.0_rt;
+        } else {
+            vcent(i,j,0,0) = (0.125_rt*(axp-axm) + nx*0.5_rt*bcent(i,j,0,0)*bcent(i,j,0,0)) / (vfrac(i,j,0) + 1.e-30_rt);
+        }
         vcent(i,j,0,1) = 0.0_rt;
     } else {
         Real aa = nxabs/ny;
@@ -322,31 +313,6 @@ void build_cells (Box const& bx, Array4<EBCellFlag> const& cell,
         }
     });
 
-    smc.copyToHost();
-    nsmallcells += *hp;
-
-    if (nsmallcells > 0 || nmulticuts > 0) {
-        Box const& nbxg1 = amrex::surroundingNodes(bxg1);
-        AMREX_HOST_DEVICE_FOR_3D(nbxg1, i, j, k,
-        {
-            if (levset(i,j,k) < Real(0.0)) {
-                if        (bxg1.contains(i-1,j-1,k)
-                           &&       cell(i-1,j-1,k).isCovered()) {
-                    levset(i,j,k) = Real(0.0);
-                } else if (bxg1.contains(i  ,j-1,k)
-                           &&       cell(i  ,j-1,k).isCovered()) {
-                    levset(i,j,k) = Real(0.0);
-                } else if (bxg1.contains(i-1,j  ,k)
-                           &&       cell(i-1,j  ,k).isCovered()) {
-                    levset(i,j,k) = Real(0.0);
-                } else if (bxg1.contains(i  ,j  ,k)
-                           &&       cell(i  ,j  ,k).isCovered()) {
-                    levset(i,j,k) = Real(0.0);
-                }
-            }
-        });
-    }
-
     // set cells in the extended region to covered if the
     // corresponding cell on the domain face is covered
     if(extend_domain_face) {
@@ -393,10 +359,36 @@ void build_cells (Box const& bx, Array4<EBCellFlag> const& cell,
               if( in_extended_domain && (! cell(i,j,k).isCovered())
                   && cell(ii,jj,kk).isCovered() )
               {
+                  Gpu::Atomic::Add(dp, 1);
                   set_covered(i,j,cell,vfrac,vcent,barea,bcent,bnorm);
               }
           });
        }
+    }
+
+    smc.copyToHost();
+    nsmallcells += *hp;
+
+    if (nsmallcells > 0 || nmulticuts > 0) {
+        Box const& nbxg1 = amrex::surroundingNodes(bxg1);
+        AMREX_HOST_DEVICE_FOR_3D(nbxg1, i, j, k,
+        {
+            if (levset(i,j,k) < Real(0.0)) {
+                if        (bxg1.contains(i-1,j-1,k)
+                           &&       cell(i-1,j-1,k).isCovered()) {
+                    levset(i,j,k) = Real(0.0);
+                } else if (bxg1.contains(i  ,j-1,k)
+                           &&       cell(i  ,j-1,k).isCovered()) {
+                    levset(i,j,k) = Real(0.0);
+                } else if (bxg1.contains(i-1,j  ,k)
+                           &&       cell(i-1,j  ,k).isCovered()) {
+                    levset(i,j,k) = Real(0.0);
+                } else if (bxg1.contains(i  ,j  ,k)
+                           &&       cell(i  ,j  ,k).isCovered()) {
+                    levset(i,j,k) = Real(0.0);
+                }
+            }
+        });
     }
 
     // Build neighbors.  By default, all neighbors are already set.
