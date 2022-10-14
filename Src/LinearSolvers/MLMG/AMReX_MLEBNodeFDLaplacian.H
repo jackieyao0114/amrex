@@ -100,6 +100,7 @@ public:
     virtual void fixUpResidualMask (int amrlev, iMultiFab& resmsk) final override;
 
     virtual bool isSingular (int) const final override { return false; }
+    virtual bool isBottomSingular () const final override { return false; }
 
     virtual void compGrad (int amrlev, const Array<MultiFab*,AMREX_SPACEDIM>& grad,
                            MultiFab& sol, Location /*loc*/) const override;
@@ -117,6 +118,8 @@ public:
                           Real* const rhs,
                           Array4<Real const> const& bfab) const override;
 #endif
+
+    virtual void postSolve (Vector<Any>& sol) const override;
 
 private:
     GpuArray<Real,AMREX_SPACEDIM> m_sigma{{AMREX_D_DECL(1_rt,1_rt,1_rt)}};
