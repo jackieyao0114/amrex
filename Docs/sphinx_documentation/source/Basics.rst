@@ -2549,7 +2549,11 @@ The basic idea behind physical boundary conditions is as follows:
            Reflection from interior cells with sign
            changed, :math:`q(-i) = -q(i)`.
 
--  For external Dirichlet boundaries, the user needs to provide a
+       user_1, user_2 and user_3
+           "User".  It is the user's responsibility to write a routine
+           to fill ghost cells (more details below).
+
+-  For external Dirichlet and user boundaries, the user needs to provide a
    callable object like below.
 
    .. highlight:: c++
@@ -2564,7 +2568,7 @@ The basic idea behind physical boundary conditions is as follows:
                             const BCRec* bcr, const int bcomp,
                             const int orig_comp) const
            {
-               // external Dirichlet for cell iv
+               // external Dirichlet or user BC for cell iv
            }
        };
 
@@ -2695,14 +2699,3 @@ Backtrace files are produced by AMReX signal handler by default when
 segfault occurs or ``Abort`` is called.  If the application does not
 want AMReX to handle this, ``ParmParse`` parameter
 `amrex.signal_handling=0` can be used to disable it.
-
-
-
-Example Codes
-=============
-
-To assist users we have multiple example codes introducing AMReX functionality.
-They range from HelloWorld walk-thrus to stand-alone examples of complex
-features in practice. To access the available examples, please see
-`AMReX Guided Tutorials and Example Codes
-<https://amrex-codes.github.io/amrex/tutorials_html/>`_.

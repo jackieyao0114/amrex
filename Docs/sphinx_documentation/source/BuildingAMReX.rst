@@ -584,7 +584,7 @@ the following line in the appropriate CMakeLists.txt file:
 
 ::
 
-    target_link_libraries( <your-target-name>  AMReX::<amrex-target-name> )
+    target_link_libraries( <your-target-name> PUBLIC AMReX::<amrex-target-name> )
 
 
 In the above snippet, ``<amrex-target-name>`` is any of the targets listed in the table below.
@@ -709,7 +709,7 @@ As an example, consider the following CMake code:
 ::
 
     find_package(AMReX REQUIRED 3D EB)
-    target_link_libraries( Foo  AMReX::amrex AMReX::Flags_CXX )
+    target_link_libraries( Foo PUBLIC AMReX::amrex )
 
 The code in the snippet above checks whether an AMReX installation with 3D and Embedded Boundary support
 is available on the system. If so, AMReX is linked to target ``Foo`` and AMReX flags preset is used
@@ -728,7 +728,7 @@ You can tell CMake to look for the AMReX library in non-standard paths by settin
 ``AMReX_ROOT`` to point to the AMReX installation directory or by adding
 ``-DAMReX_ROOT=<path/to/amrex/installation/directory>`` to the ``cmake`` invocation.
 More details on ``find_package`` can be found
-`here <https://cmake.org/cmake/help/v3.14/command/find_package.html>`_.
+`here <https://cmake.org/cmake/help/v3.17/command/find_package.html>`_.
 
 .. _sec:build:windows:
 
