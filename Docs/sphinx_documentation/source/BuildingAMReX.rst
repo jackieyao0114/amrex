@@ -434,7 +434,7 @@ The list of available options is reported in the :ref:`table <tab:cmakevar>` bel
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
    | CMAKE_CXX_FLAGS              |  User-defined C++ flags                         |                         | user-defined          |
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
-   | CMAKE_CXX_STANDARD           |  C++ standard                                   | compiler/14             | 14, 17, 20            |
+   | CMAKE_CXX_STANDARD           |  C++ standard                                   | compiler/17             | 17, 20                |
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
    | AMReX_SPACEDIM               |  Dimension of AMReX build                       | 3                       | 1, 2, 3               |
    +------------------------------+-------------------------------------------------+-------------------------+-----------------------+
@@ -730,7 +730,7 @@ You can tell CMake to look for the AMReX library in non-standard paths by settin
 ``AMReX_ROOT`` to point to the AMReX installation directory or by adding
 ``-DAMReX_ROOT=<path/to/amrex/installation/directory>`` to the ``cmake`` invocation.
 More details on ``find_package`` can be found
-`here <https://cmake.org/cmake/help/v3.17/command/find_package.html>`_.
+`here <https://cmake.org/cmake/help/v3.25/command/find_package.html>`_.
 
 .. _sec:build:windows:
 

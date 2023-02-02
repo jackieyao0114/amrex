@@ -64,7 +64,9 @@ public:
 #endif
 #endif
 
-    static int numGpuStreams () noexcept { return max_gpu_streams; }
+    static int numGpuStreams () noexcept {
+        return inSingleStreamRegion() ? 1 : max_gpu_streams;
+    }
 
     static void setStreamIndex (const int idx) noexcept;
     static void resetStreamIndex () noexcept { setStreamIndex(0); }
@@ -77,7 +79,8 @@ public:
 #endif
 
     static int deviceId () noexcept;
-    static int numDevicesUsed () noexcept;
+    static int numDevicesUsed () noexcept; // Total number of device used
+    static int numDevicePartners () noexcept; // Number of partners sharing my device
 
     /**
      * Halt execution of code until GPU has finished processing all previously requested
@@ -168,6 +171,7 @@ private:
 
     static AMREX_EXPORT int device_id;
     static AMREX_EXPORT int num_devices_used;
+    static AMREX_EXPORT int num_device_partners;
     static AMREX_EXPORT int verbose;
     static AMREX_EXPORT int max_gpu_streams;
 
