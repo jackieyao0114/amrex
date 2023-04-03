@@ -50,10 +50,13 @@ add_amrex_define( AMREX_MPI_THREAD_MULTIPLE NO_LEGACY IF AMReX_MPI_THREAD_MULTIP
 # OpenMP -- This one has legacy definition only in Base/AMReX_omp_mod.F90
 add_amrex_define( AMREX_USE_OMP IF AMReX_OMP )
 
-# DPCPP
-add_amrex_define( AMREX_USE_DPCPP NO_LEGACY IF AMReX_DPCPP )
-add_amrex_define( AMREX_USE_GPU NO_LEGACY IF AMReX_DPCPP )
-add_amrex_define( AMREX_USE_ONEDPL NO_LEGACY IF AMReX_DPCPP_ONEDPL )
+# SYCL
+if (AMReX_SYCL)
+  add_amrex_define( AMREX_USE_SYCL NO_LEGACY )
+  add_amrex_define( AMREX_USE_DPCPP NO_LEGACY )
+  add_amrex_define( AMREX_SYCL_SUB_GROUP_SIZE=${AMReX_SYCL_SUB_GROUP_SIZE} NO_LEGACY )
+  add_amrex_define( AMREX_USE_ONEDPL NO_LEGACY IF AMReX_SYCL_ONEDPL )
+endif()
 
 # HIP
 add_amrex_define( AMREX_USE_HIP NO_LEGACY IF AMReX_HIP )
@@ -138,16 +141,17 @@ add_amrex_define( AMREX_USE_ASCENT NO_LEGACY IF AMReX_ASCENT )
 #
 add_amrex_define( AMREX_USE_CUDA NO_LEGACY IF AMReX_CUDA )
 add_amrex_define( AMREX_USE_NVML NO_LEGACY IF AMReX_CUDA )
-add_amrex_define( AMREX_GPU_MAX_THREADS=${AMReX_CUDA_MAX_THREADS} NO_LEGACY
-   IF AMReX_CUDA )
 
 #
 # General setup for any GPUs
 #
-if (AMReX_CUDA OR AMReX_HIP)
-   add_amrex_define( AMREX_USE_GPU  NO_LEGACY )
+if (NOT AMReX_GPU_BACKEND STREQUAL NONE)
+   add_amrex_define( AMREX_USE_GPU NO_LEGACY )
+   add_amrex_define( AMREX_GPU_MAX_THREADS=${AMReX_GPU_MAX_THREADS} NO_LEGACY )
    add_amrex_define( BL_COALESCE_FABS )
+endif()
 
+if (AMReX_CUDA OR AMReX_HIP)
    add_amrex_define( AMREX_GPUS_PER_SOCKET=${GPUS_PER_SOCKET}
       NO_LEGACY IF GPUS_PER_SOCKET)
 

@@ -10,7 +10,7 @@
 
 namespace amrex {
 
-namespace Gpu { namespace Atomic {
+namespace Gpu::Atomic {
 
 // For Add, Min and Max, we support int, unsigned int, long, unsigned long long, float and double.
 // For LogicalOr and LogicalAnd, the data type is int.
@@ -21,7 +21,7 @@ namespace Gpu { namespace Atomic {
 
 namespace detail {
 
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
 
     template <typename R, typename I, typename F>
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
@@ -124,7 +124,7 @@ namespace detail {
 
 #ifdef AMREX_USE_GPU
 
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
     template<class T, sycl::access::address_space AS = sycl::access::address_space::global_space>
 #else
     template<class T>
@@ -187,16 +187,16 @@ namespace detail {
 
 #endif
 
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
     template<class T, sycl::access::address_space AS = sycl::access::address_space::global_space>
 #else
     template<class T>
 #endif
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-    T Add (T* const sum, T const value) noexcept
+    T Add (T* sum, T value) noexcept
     {
 #if AMREX_DEVICE_COMPILE
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
         return Add_device<T,AS>(sum, value);
 #else
         return Add_device(sum, value);
@@ -212,7 +212,7 @@ namespace detail {
 //  If
 ////////////////////////////////////////////////////////////////////////
 
-#if defined(AMREX_USE_CUDA) || defined(AMREX_USE_HIP) || defined(AMREX_USE_DPCPP)
+#if defined(AMREX_USE_CUDA) || defined(AMREX_USE_HIP) || defined(AMREX_USE_SYCL)
     template <typename T, typename Op, typename Cond,
               std::enable_if_t<sizeof(T) == sizeof(unsigned int), int> foo = 0>
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
@@ -270,16 +270,16 @@ namespace detail {
 //  AddNoRet
 ////////////////////////////////////////////////////////////////////////
 
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
     template<class T, sycl::access::address_space AS = sycl::access::address_space::global_space>
 #else
     template<class T>
 #endif
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-    void AddNoRet (T* const sum, T const value) noexcept
+    void AddNoRet (T* sum, T value) noexcept
     {
 #if AMREX_DEVICE_COMPILE
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
         Add_device<T,AS>(sum, value);
 #else
         Add_device(sum, value);
@@ -332,13 +332,13 @@ namespace detail {
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
     float Min_device (float* const m, float const value) noexcept
     {
-        return detail::atomic_op<float,int>(m,value,amrex::Less<float>());
+        return detail::atomic_op<float,int>(m,value,amrex::Minimum<float>());
     }
 
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
     double Min_device (double* const m, double const value) noexcept
     {
-        return detail::atomic_op<double, unsigned long long int>(m,value,amrex::Less<double>());
+        return detail::atomic_op<double, unsigned long long int>(m,value,amrex::Minimum<double>());
     }
 
 #if defined(AMREX_USE_CUDA) || defined(AMREX_USE_HIP)
@@ -346,7 +346,7 @@ namespace detail {
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
     Long Min_device (Long* const m, Long const value) noexcept
     {
-        return detail::atomic_op<Long, unsigned long long int>(m,value,amrex::Less<Long>());
+        return detail::atomic_op<Long, unsigned long long int>(m,value,amrex::Minimum<Long>());
     }
 
 #endif
@@ -394,13 +394,13 @@ namespace detail {
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
     float Max_device (float* const m, float const value) noexcept
     {
-        return detail::atomic_op<float,int>(m,value,amrex::Greater<float>());
+        return detail::atomic_op<float,int>(m,value,amrex::Maximum<float>());
     }
 
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
     double Max_device (double* const m, double const value) noexcept
     {
-        return detail::atomic_op<double, unsigned long long int>(m,value,amrex::Greater<double>());
+        return detail::atomic_op<double, unsigned long long int>(m,value,amrex::Maximum<double>());
     }
 
 #if defined(AMREX_USE_CUDA) || defined(AMREX_USE_HIP)
@@ -408,7 +408,7 @@ namespace detail {
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
     Long Max_device (Long* const m, Long const value) noexcept
     {
-        return detail::atomic_op<Long, unsigned long long int>(m,value,amrex::Greater<Long>());
+        return detail::atomic_op<Long, unsigned long long int>(m,value,amrex::Maximum<Long>());
     }
 
 #endif
@@ -480,7 +480,7 @@ namespace detail {
 
     template <typename T>
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-    T Exch (T* const address, T const val) noexcept
+    T Exch (T* address, T val) noexcept
     {
 #if defined(__CUDA_ARCH__) && defined(AMREX_USE_CUDA) || \
     defined(__HIP_DEVICE_COMPILE__) && defined(AMREX_USE_HIP)
@@ -522,9 +522,9 @@ namespace detail {
         return old;
 #endif
     }
-}}
+}
 
-namespace HostDevice { namespace Atomic {
+namespace HostDevice::Atomic {
 
     template <class T>
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -540,7 +540,7 @@ namespace HostDevice { namespace Atomic {
 #endif
     }
 
-}}
+}
 
 #ifdef AMREX_USE_GPU
 // functors

@@ -17,8 +17,8 @@ namespace
 
 #ifdef AMREX_USE_GPU
 namespace amrex {
-#ifdef AMREX_USE_DPCPP
-    dpcpp_rng_descr* rand_engine_descr = nullptr;
+#ifdef AMREX_USE_SYCL
+    sycl_rng_descr* rand_engine_descr = nullptr;
 #else
     amrex::randState_t* gpu_rand_state = nullptr;
 #endif
@@ -37,9 +37,9 @@ void ResizeRandomSeed (amrex::ULong gpu_seed)
 
     const int N = Gpu::Device::maxBlocksPerLaunch() * AMREX_GPU_MAX_THREADS;
 
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
 
-    rand_engine_descr = new dpcpp_rng_descr
+    rand_engine_descr = new sycl_rng_descr
         (Gpu::Device::streamQueue(), sycl::range<1>(N), gpu_seed, 1);
 
 #elif defined(AMREX_USE_CUDA) || defined(AMREX_USE_HIP)
@@ -66,6 +66,12 @@ InitRandom (ULong cpu_seed, int nprocs, ULong gpu_seed)
 {
     nthreads = OpenMP::get_max_threads();
     generators.resize(nthreads);
+
+#ifdef AMREX_USE_OMP
+    if (omp_in_parallel()) {
+        amrex::Abort("It is not safe to call amrex::InitRandom inside a threaded region.");
+    }
+#endif
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel
@@ -137,8 +143,8 @@ RestoreRandomState (std::istream& is, int nthreads_old, int nstep_old)
         const int MyProc = ParallelDescriptor::MyProc();
         for (int i = nthreads_old; i < nthreads; i++) {
             ULong seed = MyProc+1 + i*NProcs;
-            if (std::numeric_limits<ULong>::max()/(ULong)(nstep_old+1)
-                > static_cast<ULong>(nthreads*NProcs)) // avoid overflow
+            if (std::numeric_limits<ULong>::max()/static_cast<ULong>(nstep_old+1)
+                > static_cast<ULong>(nthreads)*static_cast<ULong>(NProcs)) // avoid overflow
             {
                 seed += nstep_old*nthreads*NProcs;
             }
@@ -158,7 +164,7 @@ UniqueRandomSubset (Vector<int> &uSet, int setSize, int poolSize,
   std::set<int> copySet;
   Vector<int> uSetTemp;
   while(static_cast<int>(copySet.size()) < setSize) {
-    int r(Random_int(poolSize));
+    int r = static_cast<int>(Random_int(poolSize));
     if(copySet.find(r) == copySet.end()) {
       copySet.insert(r);
       uSetTemp.push_back(r);
@@ -181,7 +187,7 @@ void
 DeallocateRandomSeedDevArray ()
 {
 #ifdef AMREX_USE_GPU
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
     if (rand_engine_descr) {
         delete rand_engine_descr;
         Gpu::streamSynchronize();
@@ -195,32 +201,6 @@ DeallocateRandomSeedDevArray ()
     }
 #endif
 #endif
-}
-
-void
-NItemsPerBin (int totalItems, Vector<int> &binCounts)
-{
-  if(binCounts.size() == 0) {
-    return;
-  }
-  bool verbose(false);
-  int countForAll(totalItems / binCounts.size());
-  int remainder(totalItems % binCounts.size());
-  if(verbose) {
-      Print() << "amrex::NItemsPerBin:  countForAll remainder = " << countForAll
-                     << "  " << remainder << std::endl;
-  }
-  for(int i(0); i < binCounts.size(); ++i) {
-    binCounts[i] = countForAll;
-  }
-  for(int i(0); i < remainder; ++i) {
-    ++binCounts[i];
-  }
-  for(int i(0); i < binCounts.size(); ++i) {
-    if(verbose) {
-        Print() << "amrex::NItemsPerBin::  binCounts[" << i << "] = " << binCounts[i] << std::endl;
-    }
-  }
 }
 
 } // namespace amrex

@@ -6,13 +6,13 @@
 
 #ifdef AMREX_USE_GPU
 
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
 #  include <sycl/sycl.hpp>
 #endif
 
 namespace amrex {
 
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
 
 struct dim3 {
     unsigned int x = 1;
@@ -37,9 +37,9 @@ struct gpuStream_t {
 
 #endif
 
-namespace amrex { namespace Gpu {
+namespace amrex::Gpu {
 
-#if defined(AMREX_USE_DPCPP)
+#if defined(AMREX_USE_SYCL)
 
 struct Handler
 {
@@ -75,7 +75,7 @@ struct Handler
     void syncThreads () const { item->barrier(sycl::access::fence_space::global_and_local); }
 
     sycl::nd_item<1> const* item;
-    void* local; // DPC++ local memory
+    void* local; // SYCL shared local memory
     int numActiveThreads;
 };
 
@@ -101,6 +101,6 @@ struct Handler {};
 
 #endif
 
-}}
+}
 
 #endif

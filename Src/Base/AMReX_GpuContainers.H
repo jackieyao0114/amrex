@@ -11,9 +11,7 @@
 #include <numeric>
 #include <iterator>
 
-namespace amrex {
-
-namespace Gpu {
+namespace amrex::Gpu {
 
 #ifdef AMREX_USE_GPU
 
@@ -452,7 +450,7 @@ namespace Gpu {
             int nthreads_per_block = (sizeof(T) <= 64) ? 256 : 128;
             int nblocks = static_cast<int>((N+nthreads_per_block-1)/nthreads_per_block);
             std::size_t shared_mem_bytes = nthreads_per_block * sizeof(T);
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
             amrex::launch(nblocks, nthreads_per_block, shared_mem_bytes, Gpu::gpuStream(),
             [=] AMREX_GPU_DEVICE (Gpu::Handler const& handler) noexcept
             {
@@ -500,6 +498,6 @@ namespace Gpu {
 #endif
     }
 
-}}
+}
 
 #endif

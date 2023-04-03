@@ -50,9 +50,9 @@ namespace Gpu {
         void* data[] = { (void*)(&is_managed) };
         CUresult r = cuPointerGetAttributes(1, &attrib, data, (CUdeviceptr)p);
         return r == CUDA_SUCCESS && is_managed;
-#elif defined(AMREX_USE_DPCPP)
+#elif defined(AMREX_USE_SYCL)
         amrex::ignore_unused(p);
-        // xxxxx DPCPP todo: get_pointer_type
+        // xxxxx SYCL todo: get_pointer_type
 //        auto const info = sycl::get_pointer_info(p);
 //        auto type = sycl::get_pointer_type(p,Device::syclContext());
         return false;
@@ -73,9 +73,9 @@ namespace Gpu {
         void* data[] = { (void*)(&mem_type) };
         CUresult r = cuPointerGetAttributes(1, &attrib, data, (CUdeviceptr)p);
         return r == CUDA_SUCCESS && mem_type == CU_MEMORYTYPE_DEVICE;
-#elif defined(AMREX_USE_DPCPP)
+#elif defined(AMREX_USE_SYCL)
         amrex::ignore_unused(p);
-        // xxxxx DPCPP todo: get_pointer_type
+        // xxxxx SYCL todo: get_pointer_type
         return false;
 #else
         amrex::ignore_unused(p);
@@ -94,9 +94,9 @@ namespace Gpu {
         void* data[] = { (void*)(&mem_type) };
         CUresult r = cuPointerGetAttributes(1, &attrib, data, (CUdeviceptr)p);
         return r == CUDA_SUCCESS && mem_type == CU_MEMORYTYPE_HOST;
-#elif defined(AMREX_USE_DPCPP)
+#elif defined(AMREX_USE_SYCL)
         amrex::ignore_unused(p);
-        // xxxxx DPCPP todo: get_pointer_type
+        // xxxxx SYCL todo: get_pointer_type
         return false;
 #else
         amrex::ignore_unused(p);
@@ -125,9 +125,9 @@ namespace Gpu {
              mem_type == CU_MEMORYTYPE_DEVICE ||
              mem_type == CU_MEMORYTYPE_ARRAY  ||
              mem_type == CU_MEMORYTYPE_UNIFIED);
-#elif defined(AMREX_USE_DPCPP)
+#elif defined(AMREX_USE_SYCL)
         amrex::ignore_unused(p);
-        // xxxxx DPCPP todo: get_pointer_type
+        // xxxxx SYCL todo: get_pointer_type
         return false;
 #else
         amrex::ignore_unused(p);
@@ -139,10 +139,7 @@ namespace Gpu {
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
     bool isnan (T m) noexcept
     {
-#if defined(__CUDA_ARCH__) && defined(AMREX_USE_CUDA) || \
-    defined(__HIP_DEVICE_COMPILE__) && defined(AMREX_USE_HIP)
-        return ::isnan(m);
-#elif defined(__SYCL_DEVICE_ONLY__)
+#if defined(AMREX_USE_SYCL)
         return sycl::isnan(m);
 #else
         return std::isnan(m);
@@ -153,10 +150,7 @@ namespace Gpu {
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
     bool isinf (T m) noexcept
     {
-#if defined(__CUDA_ARCH__) && defined(AMREX_USE_CUDA) || \
-    defined(__HIP_DEVICE_COMPILE__) && defined(AMREX_USE_HIP)
-        return ::isinf(m);
-#elif defined(__SYCL_DEVICE_ONLY__)
+#if defined(AMREX_USE_SYCL)
         return sycl::isinf(m);
 #else
         return std::isinf(m);
@@ -198,7 +192,7 @@ namespace Gpu {
 #endif
 
     private:
-        void init() noexcept;
+        void init () noexcept; // NOLINT
 
         int m_n;
         int m_i;
