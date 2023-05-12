@@ -140,7 +140,6 @@ main (int   argc,
                   if (i == 32 && k == 27){ 
                     // k == 180 for Magnon_PSSW case; k == 27 for 0-order magnon-photon; for scaled, k == 50
                     std::cout << i << " " << j << " " << k << " " << n << " " << mfdata(i,j,k,n) << "\n";
-                  }
                 }
                 }
                 }
