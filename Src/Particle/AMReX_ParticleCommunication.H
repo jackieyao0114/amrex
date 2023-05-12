@@ -8,6 +8,7 @@
 #include <AMReX_ParticleBufferMap.H>
 #include <AMReX_MFIter.H>
 #include <AMReX_TypeTraits.H>
+#include <AMReX_MakeParticle.H>
 
 #include <map>
 
@@ -152,8 +153,6 @@ struct ParticleCopyPlan
         auto p_dst_box_counts = m_box_counts_d.dataPtr();
         auto getBucket = pc.BufferMap().getBucketFunctor();
 
-        constexpr unsigned int max_unsigned_int = std::numeric_limits<unsigned int>::max();
-
         m_dst_indices.resize(num_levels);
         for (int lev = 0; lev < num_levels; ++lev)
         {
@@ -174,8 +173,8 @@ struct ParticleCopyPlan
                     if (dst_box >= 0)
                     {
                         int dst_lev = p_levs[i];
-                        int index = Gpu::Atomic::Inc(
-                            &p_dst_box_counts[getBucket(dst_lev, dst_box)], max_unsigned_int);
+                        int index = static_cast<int>(Gpu::Atomic::Add(
+                            &p_dst_box_counts[getBucket(dst_lev, dst_box)], 1u));
                         p_dst_indices[i] = index;
                     }
                 });
@@ -251,12 +250,12 @@ private:
     // In the global version, we don't know who we'll receive from, so we
     // need to do some collective communication first.
     //
-    void doHandShakeGlobal (const Vector<Long>& Snds, Vector<Long>& Rcvs) const;
+    static void doHandShakeGlobal (const Vector<Long>& Snds, Vector<Long>& Rcvs);
 
     //
     // Another version of the above that is implemented using MPI All-to-All
     //
-    void doHandShakeAllToAll (const Vector<Long>& Snds, Vector<Long>& Rcvs) const;
+    static void doHandShakeAllToAll (const Vector<Long>& Snds, Vector<Long>& Rcvs);
 
     bool m_local;
 };
@@ -295,15 +294,13 @@ void packBuffer (const PC& pc, const ParticleCopyOp& op, const ParticleCopyPlan&
 {
     BL_PROFILE("amrex::packBuffer");
 
-    using ParticleType = typename PC::ParticleType;
-
     Long psize = plan.superParticleSize();
 
     int num_levels = op.numLevels();
     int num_buckets = pc.BufferMap().numBuckets();
 
     std::size_t total_buffer_size = 0;
-    if (plan.m_snd_offsets.size() == 0)
+    if (plan.m_snd_offsets.empty())
     {
         unsigned int np = 0;
         Gpu::copy(Gpu::deviceToHost, plan.m_box_offsets.begin() + num_buckets,
@@ -367,17 +364,19 @@ void packBuffer (const PC& pc, const ParticleCopyOp& op, const ParticleCopyPlan&
 
                     if (do_periodic_shift)
                     {
-                        ParticleType p;
-                        amrex::Gpu::memcpy(&p, &p_snd_buffer[dst_offset], sizeof(ParticleType));
+                        ParticleReal pos[AMREX_SPACEDIM];
+                        amrex::Gpu::memcpy(&pos[0], &p_snd_buffer[dst_offset],
+                                           AMREX_SPACEDIM*sizeof(ParticleReal));
                         for (int idim = 0; idim < AMREX_SPACEDIM; ++idim)
                         {
                             if (! is_per[idim]) continue;
                             if (pshift[idim] > 0)
-                                p.pos(idim) += phi[idim] - plo[idim];
+                                pos[idim] += phi[idim] - plo[idim];
                             else if (pshift[idim] < 0)
-                                p.pos(idim) -= phi[idim] - plo[idim];
+                                pos[idim] -= phi[idim] - plo[idim];
                         }
-                        amrex::Gpu::memcpy(&p_snd_buffer[dst_offset], &p, sizeof(ParticleType));
+                        amrex::Gpu::memcpy(&p_snd_buffer[dst_offset], &pos[0],
+                                           AMREX_SPACEDIM*sizeof(ParticleReal));
                     }
                 }
             });

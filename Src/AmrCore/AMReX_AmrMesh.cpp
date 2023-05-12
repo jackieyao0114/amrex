@@ -192,7 +192,7 @@ AmrMesh::InitAmrMesh (int max_level_in, const Vector<int>& n_cell_in,
         }
         else if (got_int == 1)
         {
-            const int ncnt = ratios.size();
+            const int ncnt = static_cast<int>(ratios.size());
             for (int i = 0; i < ncnt && i < max_level; ++i)
             {
                 for (int n = 0; n < AMREX_SPACEDIM; n++) {
@@ -214,7 +214,7 @@ AmrMesh::InitAmrMesh (int max_level_in, const Vector<int>& n_cell_in,
         }
     }
     //if sent in, this wins over everything.
-    if(a_refrat.size() > 0)
+    if(!a_refrat.empty())
     {
       for (int i = 0; i < max_level; i++)
       {
@@ -440,27 +440,34 @@ AmrMesh::ChopGrids (int lev, BoxArray& ba, int target_size) const
     if (refine_grid_layout_dims == 0) { return; }
 
     IntVect chunk = max_grid_size[lev];
+    chunk.min(Geom(lev).Domain().length());
 
     while (ba.size() < target_size)
     {
         IntVect chunk_prev = chunk;
 
-        for (int idim = AMREX_SPACEDIM-1; idim >=0; idim--){
-            if (refine_grid_layout_dims[idim]){
+        std::array<std::pair<int,int>,AMREX_SPACEDIM>
+            chunk_dir{AMREX_D_DECL(std::make_pair(chunk[0],int(0)),
+                                   std::make_pair(chunk[1],int(1)),
+                                   std::make_pair(chunk[2],int(2)))};
+        std::sort(chunk_dir.begin(), chunk_dir.end());
+
+        for (int idx = AMREX_SPACEDIM-1; idx >= 0; idx--) {
+            int idim = chunk_dir[idx].second;
+            if (refine_grid_layout_dims[idim]) {
                 int new_chunk_size = chunk[idim] / 2;
-                if ( (ba.size() < target_size) && (new_chunk_size%blocking_factor[lev][idim] == 0))
-                {
+                if (new_chunk_size%blocking_factor[lev][idim] == 0) {
                     chunk[idim] = new_chunk_size;
                     ba.maxSize(chunk);
+                    break;
                 }
             }
         }
 
-        if (chunk == chunk_prev){
+        if (chunk == chunk_prev) {
             break;
         }
     }
-
 }
 
 BoxArray
@@ -678,7 +685,7 @@ AmrMesh::MakeNewGrids (int lbase, Real time, int& new_finest, Vector<BoxArray>& 
         tags.collate(tagvec);
         tags.clear();
 
-        if (tagvec.size() > 0)
+        if (!tagvec.empty())
         {
             //
             // Created new level, now generate efficient grids.
@@ -694,7 +701,7 @@ AmrMesh::MakeNewGrids (int lbase, Real time, int& new_finest, Vector<BoxArray>& 
                     //
                     // Construct initial cluster.
                     //
-                    ClusterList clist(&tagvec[0], tagvec.size());
+                    ClusterList clist(&tagvec[0], static_cast<Long>(tagvec.size()));
                     if (use_new_chop) {
                         clist.new_chop(grid_eff);
                     } else {
@@ -858,12 +865,22 @@ AmrMesh::ProjPeriodic (BoxList& blout, const Box& domain,
 
     BoxList blorig(blout);
 
-    int nist,njst,nkst;
-    int niend,njend,nkend;
-    nist = njst = nkst = 0;
-    niend = njend = nkend = 0;
-    AMREX_D_TERM( nist , =njst , =nkst ) = -1;
-    AMREX_D_TERM( niend , =njend , =nkend ) = +1;
+    int nist = -1;
+    int niend = 1;
+#if (AMREX_SPACEDIM < 2)
+    int njst = 0;
+    int njend = 0;
+#else
+    int njst = -1;
+    int njend = 1;
+#endif
+#if (AMREX_SPACEDIM < 3)
+    int nkst = 0;
+    int nkend = 0;
+#else
+    int nkst = -1;
+    int nkend = 1;
+#endif
 
     int ri,rj,rk;
     for (ri = nist; ri <= niend; ri++)

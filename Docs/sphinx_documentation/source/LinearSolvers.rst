@@ -368,8 +368,9 @@ Available choices are
 - :cpp:`LPInfo::setConsolidation(bool)` (by default true) can be used
   continue to transfer a multigrid problem to fewer MPI ranks.
   There are more setting sucsh as :cpp:`LPInfo::setConsolidationGridSize(int)`,
-  :cpp:`consolidation_threshold`, :cpp:`consolidation_ratio`, and
-  :cpp:`consolidation_strategy`, to give control over how this process works.
+  :cpp:`LPInfo::setConsolidationRatio(int)`, and
+  :cpp:`LPInfo::setConsolidationStrategy(int)`, to give control over how this
+  process works.
 
 Boundary Stencils for Cell-Centered Solvers
 ===========================================
@@ -399,7 +400,7 @@ Some of the linear solvers support curvilinear coordinates including 1D
 spherical and 2d cylindrical :math:`(r,z)`.  In those cases, the
 divergence operator has extra metric terms.  If one does not want the
 solver to include the metric terms because they have been handled in
-other ways, one can turn them off with a setter funtion. For
+other ways, one can turn them off with a setter function. For
 the cell-centered linear solvers `MLABecLaplacian` and `MLPoisson`, one
 can call :cpp:`setMetricTerm(bool)` with :cpp:`false`
 on the :cpp:`LPInfo` object passed to the constructor of linear

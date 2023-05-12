@@ -4,10 +4,10 @@
 
 #include <AMReX_WriteBinaryParticleData.H>
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WriteParticleRealData (void* data, size_t size, std::ostream& os) const
 {
     if (sizeof(typename ParticleType::RealType) == 4) {
@@ -18,10 +18,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     }
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::ReadParticleRealData (void* data, size_t size, std::istream& is)
 {
     if (sizeof(typename ParticleType::RealType) == 4) {
@@ -32,10 +32,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     }
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::Checkpoint (const std::string& dir,
               const std::string& name, bool /*is_checkpoint*/,
               const Vector<std::string>& real_comp_names,
@@ -46,7 +46,7 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     for (int i = 0; i < NStructReal + NumRealComps(); ++i )
     {
         write_real_comp.push_back(1);
-        if (real_comp_names.size() == 0)
+        if (real_comp_names.empty())
         {
             std::stringstream ss;
             ss << "real_comp" << i;
@@ -63,7 +63,7 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     for (int i = 0; i < NStructInt + NumIntComps(); ++i )
     {
         write_int_comp.push_back(1);
-        if (int_comp_names.size() == 0)
+        if (int_comp_names.empty())
         {
             std::stringstream ss;
             ss << "int_comp" << i;
@@ -83,10 +83,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             }, true);
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFile (const std::string& dir, const std::string& name) const
 {
     Vector<int> write_real_comp;
@@ -117,10 +117,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             });
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFile (const std::string& dir, const std::string& name,
                  const Vector<std::string>& real_comp_names,
                  const Vector<std::string>& int_comp_names) const
@@ -143,10 +143,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             });
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFile (const std::string& dir, const std::string& name,
                  const Vector<std::string>& real_comp_names) const
 {
@@ -175,10 +175,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             });
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFile (const std::string& dir,
                  const std::string& name,
                  const Vector<int>& write_real_comp,
@@ -211,10 +211,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             });
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>::
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>::
 WritePlotFile (const std::string& dir, const std::string& name,
                const Vector<int>& write_real_comp,
                const Vector<int>& write_int_comp,
@@ -232,11 +232,11 @@ WritePlotFile (const std::string& dir, const std::string& name,
                             });
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 template <class F, typename std::enable_if<!std::is_same<F, Vector<std::string>&>::value>::type*>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFile (const std::string& dir, const std::string& name, F&& f) const
 {
     Vector<int> write_real_comp;
@@ -264,11 +264,11 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             std::forward<F>(f));
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 template <class F>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFile (const std::string& dir, const std::string& name,
                  const Vector<std::string>& real_comp_names,
                  const Vector<std::string>& int_comp_names, F&& f) const
@@ -288,11 +288,11 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             std::forward<F>(f));
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 template <class F, typename std::enable_if<!std::is_same<F, Vector<std::string>>::value>::type*>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFile (const std::string& dir, const std::string& name,
                  const Vector<std::string>& real_comp_names, F&& f) const
 {
@@ -318,11 +318,11 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             std::forward<F>(f));
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 template <class F>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFile (const std::string& dir,
                  const std::string& name,
                  const Vector<int>& write_real_comp,
@@ -352,11 +352,11 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
                             std::forward<F>(f));
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 template <class F>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>::
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>::
 WritePlotFile (const std::string& dir, const std::string& name,
                const Vector<int>& write_real_comp,
                const Vector<int>& write_int_comp,
@@ -372,11 +372,11 @@ WritePlotFile (const std::string& dir, const std::string& name,
                             std::forward<F>(f));
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 template <class F>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WriteBinaryParticleData (const std::string& dir, const std::string& name,
                            const Vector<int>& write_real_comp,
                            const Vector<int>& write_int_comp,
@@ -397,10 +397,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     }
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::CheckpointPre ()
 {
     if( ! usePrePost) {
@@ -454,10 +454,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
 }
 
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::CheckpointPost ()
 {
     if( ! usePrePost) {
@@ -510,30 +510,30 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     }
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFilePre ()
 {
     CheckpointPre();
 }
 
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WritePlotFilePost ()
 {
     CheckpointPost();
 }
 
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WriteParticles (int lev, std::ofstream& ofs, int fnum,
                   Vector<int>& which, Vector<int>& count, Vector<Long>& where,
                   const Vector<int>& write_real_comp,
@@ -585,19 +585,19 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
 }
 
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::Restart (const std::string& dir, const std::string& file, bool /*is_checkpoint*/)
 {
     Restart(dir, file);
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::Restart (const std::string& dir, const std::string& file)
 {
     BL_PROFILE("ParticleContainer::Restart()");
@@ -755,7 +755,7 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     if (dual_grid) {
         for (int lev = 0; lev <= finestLevel(); lev++) {
             // this can happen if there are no particles at a given level in the checkpoint
-            if (particle_box_arrays[lev].size() == 0) {
+            if (particle_box_arrays[lev].empty()) {
                 particle_box_arrays[lev] = BoxArray(Geom(lev).Domain());
             }
             SetParticleBoxArray(lev, particle_box_arrays[lev]);
@@ -842,11 +842,22 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
 
             ParticleFile.seekg(where[grid], std::ios::beg);
 
+            // Use if constexpr to avoid instantiating the mis-matched
+            // type case and triggering the static_assert on the
+            // underlying copy calls
             if (how == "single") {
-                ReadParticles<float>(count[grid], grid, lev, ParticleFile, finest_level_in_file, convert_ids);
+                if constexpr (std::is_same_v<ParticleReal, float>) {
+                    ReadParticles<float>(count[grid], grid, lev, ParticleFile, finest_level_in_file, convert_ids);
+                } else {
+                    amrex::Error("File contains single-precision data, while AMReX is compiled with ParticleReal==double");
+                }
             }
             else if (how == "double") {
-                ReadParticles<double>(count[grid], grid, lev, ParticleFile, finest_level_in_file, convert_ids);
+                if constexpr (std::is_same_v<ParticleReal, double>) {
+                    ReadParticles<double>(count[grid], grid, lev, ParticleFile, finest_level_in_file, convert_ids);
+                } else {
+                    amrex::Error("File contains double-precision data, while AMReX is compiled with ParticleReal==float");
+                }
             }
             else {
                 std::string msg("ParticleContainer::Restart(): bad parameter: ");
@@ -880,11 +891,11 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
 }
 
 // Read a batch of particles from the checkpoint file
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 template <class RTYPE>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::ReadParticles (int cnt, int grd, int lev, std::ifstream& ifs,
                  int finest_level_in_file, bool convert_ids)
 {
@@ -916,7 +927,7 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     host_particles.resize(finest_level_in_file+1);
 
     Vector<std::map<std::pair<int, int>,
-                    std::vector<Gpu::HostVector<Real> > > > host_real_attribs;
+                    std::vector<Gpu::HostVector<RTYPE> > > > host_real_attribs;
     host_real_attribs.reserve(15);
     host_real_attribs.resize(finest_level_in_file+1);
 
@@ -972,7 +983,7 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
 
         // add the real...
         for (int icomp = 0; icomp < NumRealComps(); icomp++) {
-            host_real_attribs[lev][ind][icomp].push_back(ParticleReal(*rptr));
+            host_real_attribs[lev][ind][icomp].push_back(*rptr);
             ++rptr;
         }
 
@@ -1017,10 +1028,10 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
     Gpu::streamSynchronize();
 }
 
-template <int NStructReal, int NStructInt, int NArrayReal, int NArrayInt,
+template <typename ParticleType, int NArrayReal, int NArrayInt,
           template<class> class Allocator>
 void
-ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
+ParticleContainer_impl<ParticleType, NArrayReal, NArrayInt, Allocator>
 ::WriteAsciiFile (const std::string& filename)
 {
     BL_PROFILE("ParticleContainer::WriteAsciiFile()");
@@ -1108,7 +1119,7 @@ ParticleContainer<NStructReal, NStructInt, NArrayReal, NArrayInt, Allocator>
             for (int lev = 0; lev < m_particles.size();  lev++) {
               auto& pmap = m_particles[lev];
               for (const auto& kv : pmap) {
-                ParticleTile<NStructReal, NStructInt, NArrayReal, NArrayInt,
+                ParticleTile<ParticleType, NArrayReal, NArrayInt,
                              amrex::PinnedArenaAllocator> pinned_ptile;
                 pinned_ptile.define(NumRuntimeRealComps(), NumRuntimeIntComps());
                 pinned_ptile.resize(kv.second.numParticles());

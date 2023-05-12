@@ -55,7 +55,7 @@ fab_to_fab (Vector<Array4CopyTag<T0, T1> > const& copy_tags, int scomp, int dcom
 {
     detail::ParallelFor_doit(copy_tags,
         [=] AMREX_GPU_DEVICE (
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
             sycl::nd_item<1> const& /*item*/,
 #endif
             int icell, int ncells, int i, int j, int k, Array4CopyTag<T0, T1> const tag) noexcept
@@ -87,12 +87,12 @@ fab_to_fab (Vector<Array4CopyTag<T0, T1> > const& copy_tags, int scomp, int dcom
 
     detail::ParallelFor_doit(tags,
     [=] AMREX_GPU_DEVICE (
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
         sycl::nd_item<1> const& item,
 #endif
         int icell, int ncells, int i, int j, int k, TagType const& tag) noexcept
     {
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
         int g_tid = item.get_global_id(0);
         int g_wid = g_tid / Gpu::Device::warp_size;
 
@@ -211,7 +211,7 @@ void
 FabArray<FAB>::FB_local_copy_cpu (const FB& TheFB, int scomp, int ncomp)
 {
     auto const& LocTags = *(TheFB.m_LocTags);
-    int N_locs = LocTags.size();
+    auto N_locs = static_cast<int>(LocTags.size());
     if (N_locs == 0) return;
     bool is_thread_safe = TheFB.m_threadsafe_loc;
     if (is_thread_safe)
@@ -904,7 +904,7 @@ FabArray<FAB>::pack_send_buffer_cpu (FabArray<FAB> const& src, int scomp, int nc
 {
     amrex::ignore_unused(send_size);
 
-    const int N_snds = send_data.size();
+    auto const N_snds = static_cast<int>(send_data.size());
     if (N_snds == 0) return;
 
 #ifdef AMREX_USE_OMP
@@ -944,7 +944,7 @@ FabArray<FAB>::unpack_recv_buffer_cpu (FabArray<FAB>& dst, int dcomp, int ncomp,
 {
     amrex::ignore_unused(recv_size);
 
-    const int N_rcvs = recv_cctc.size();
+    auto const N_rcvs = static_cast<int>(recv_cctc.size());
     if (N_rcvs == 0) return;
 
     if (is_thread_safe)

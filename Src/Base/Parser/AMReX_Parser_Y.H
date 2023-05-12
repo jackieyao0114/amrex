@@ -42,7 +42,9 @@ enum parser_f1_t {  // Built-in functions with one argument
     PARSER_POW_M1,
     PARSER_POW_P1,
     PARSER_POW_P2,
-    PARSER_POW_P3
+    PARSER_POW_P3,
+    PARSER_COMP_ELLINT_1,
+    PARSER_COMP_ELLINT_2
 };
 
 enum parser_f2_t {  // Built-in functions with two arguments
@@ -165,7 +167,7 @@ struct parser_node* parser_newf2 (enum parser_f2_t ftype, struct parser_node* l,
 struct parser_node* parser_newf3 (enum parser_f3_t ftype, struct parser_node* n1,
                                   struct parser_node* n2, struct parser_node* n3);
 struct parser_node* parser_newassign (struct parser_symbol* s, struct parser_node* v);
-struct parser_node* parser_newlist (struct parser_node* n1, struct parser_node* n2);
+struct parser_node* parser_newlist (struct parser_node* nl, struct parser_node* nr);
 
 /*******************************************************************/
 
@@ -184,7 +186,7 @@ struct amrex_parser* amrex_parser_new ();
 void amrex_parser_delete (struct amrex_parser* parser);
 
 struct amrex_parser* parser_dup (struct amrex_parser* source);
-struct parser_node* parser_ast_dup (struct amrex_parser* parser, struct parser_node* src, int move);
+struct parser_node* parser_ast_dup (struct amrex_parser* parser, struct parser_node* node, int move);
 
 void parser_regvar (struct amrex_parser* parser, char const* name, int i);
 void parser_setconst (struct amrex_parser* parser, char const* name, double c);
@@ -254,17 +256,43 @@ T parser_math_tanh (T a) { return std::tanh(a); }
 
 template <typename T>
 AMREX_GPU_HOST_DEVICE AMREX_NO_INLINE
+T parser_math_comp_ellint_1 (T a)
+{
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDA_ARCH__)
+    return std::comp_ellint_1(a);
+#else
+    amrex::ignore_unused(a);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, "parser: comp_ellint_1 only supported with gcc and cpu");
+    return 0.0;
+#endif
+}
+
+template <typename T>
+AMREX_GPU_HOST_DEVICE AMREX_NO_INLINE
+T parser_math_comp_ellint_2 (T a)
+{
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDA_ARCH__)
+    return std::comp_ellint_2(a);
+#else
+    amrex::ignore_unused(a);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, "parser: comp_ellint_2 only supported with gcc and cpu");
+    return 0.0;
+#endif
+}
+
+template <typename T>
+AMREX_GPU_HOST_DEVICE AMREX_NO_INLINE
 T parser_math_pow (T a, T b) { return std::pow(a,b); }
 
 template <typename T>
 AMREX_GPU_HOST_DEVICE AMREX_NO_INLINE
 T parser_math_jn (int a, T b)
 {
-#if defined AMREX_USE_DPCPP || defined __MINGW32__
+#if defined AMREX_USE_SYCL || defined __MINGW32__
     amrex::ignore_unused(a,b);
     // neither jn(f) nor std::cyl_bessel_j work yet
     // https://github.com/oneapi-src/oneAPI-spec/issues/308
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, "parser: jn in SYCL/DPC++ not supported yet");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, "parser: jn in SYCL not supported yet");
     return 0.0;
 #else
     return jn(a, b);
@@ -288,15 +316,17 @@ parser_call_f1 (enum parser_f1_t type, double a)
     case PARSER_SINH:        return parser_math_sinh<double>(a);
     case PARSER_COSH:        return parser_math_cosh<double>(a);
     case PARSER_TANH:        return parser_math_tanh<double>(a);
-    case PARSER_ABS:         return amrex::Math::abs(a);
-    case PARSER_FLOOR:       return amrex::Math::floor(a);
-    case PARSER_CEIL:        return amrex::Math::ceil(a);
+    case PARSER_ABS:         return std::abs(a);
+    case PARSER_FLOOR:       return std::floor(a);
+    case PARSER_CEIL:        return std::ceil(a);
     case PARSER_POW_M3:      return 1.0/(a*a*a);
     case PARSER_POW_M2:      return 1.0/(a*a);
     case PARSER_POW_M1:      return 1.0/a;
     case PARSER_POW_P1:      return a;
     case PARSER_POW_P2:      return a*a;
     case PARSER_POW_P3:      return a*a*a;
+    case PARSER_COMP_ELLINT_1: return parser_math_comp_ellint_1<double>(a);
+    case PARSER_COMP_ELLINT_2: return parser_math_comp_ellint_2<double>(a);
     default:
         amrex::Abort("parser_call_f1: Unknown function ");
         return 0.0;

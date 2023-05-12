@@ -19,15 +19,14 @@ namespace amrex {
 // with only diagonal components.  The EB is assumed to be Dirichlet.
 //
 // del dot (simga grad phi) - alpha/r^2 phi = rhs, for RZ where alpha is a
-// scalar constant that is zero by default.  For now the `alpha` term has
-// not been implemented yet
+// scalar constant that is zero by default.
 
 class MLEBNodeFDLaplacian
     : public MLNodeLinOp
 {
 public:
 
-    MLEBNodeFDLaplacian () noexcept {}
+    MLEBNodeFDLaplacian () = default;
 
 #ifdef AMREX_USE_EB
     MLEBNodeFDLaplacian (const Vector<Geometry>& a_geom,
@@ -42,7 +41,7 @@ public:
                          const Vector<DistributionMapping>& a_dmap,
                          const LPInfo& a_info);
 
-    virtual ~MLEBNodeFDLaplacian ();
+    virtual ~MLEBNodeFDLaplacian () = default;
 
     MLEBNodeFDLaplacian (const MLEBNodeFDLaplacian&) = delete;
     MLEBNodeFDLaplacian (MLEBNodeFDLaplacian&&) = delete;
@@ -72,7 +71,7 @@ public:
 
     virtual std::unique_ptr<FabFactory<FArrayBox> > makeFactory (int amrlev, int mglev) const final override;
 
-    virtual void scaleRHS (int amrlev, Any& rhs) const final;
+    virtual void scaleRHS (int amrlev, MultiFab& rhs) const final;
 
 #endif
 
@@ -119,7 +118,7 @@ public:
                           Array4<Real const> const& bfab) const override;
 #endif
 
-    virtual void postSolve (Vector<Any>& sol) const override;
+    virtual void postSolve (Vector<MultiFab>& sol) const override;
 
 private:
     GpuArray<Real,AMREX_SPACEDIM> m_sigma{{AMREX_D_DECL(1_rt,1_rt,1_rt)}};

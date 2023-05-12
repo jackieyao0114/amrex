@@ -54,12 +54,28 @@ print_option( USE_XSDK_DEFAULTS )
 #
 # Option to control the type of library: static vs shared  ===================
 #
-if ( USE_XSDK_DEFAULTS )
-   option( BUILD_SHARED_LIBS "Build AMReX shared library" ON )
-else ()
-   option( BUILD_SHARED_LIBS "Build AMReX shared library" OFF )
-endif ()
-print_option( BUILD_SHARED_LIBS )
+# Defaults:
+#   CMake: static
+#   xSDK: shared
+# Precendence of user options:
+#   AMReX_BUILD_SHARED_LIBS > BUILD_SHARED_LIBS > USE_XSDK_DEFAULTS
+#   default:    unset              unset               OFF
+#
+get_property(SHARED_LIBS_SUPPORTED GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS)
+mark_as_advanced(BUILD_SHARED_LIBS)
+if(DEFINED BUILD_SHARED_LIBS)
+    set(AMReX_BUILD_SHARED_LIBS_DEFAULT ${BUILD_SHARED_LIBS})
+elseif(USE_XSDK_DEFAULTS)
+    set(AMReX_BUILD_SHARED_LIBS_DEFAULT ON)
+else()
+    set(AMReX_BUILD_SHARED_LIBS_DEFAULT OFF)
+endif()
+option(AMReX_BUILD_SHARED_LIBS "Build AMReX shared library"
+    ${AMReX_BUILD_SHARED_LIBS_DEFAULT})
+if(AMReX_BUILD_SHARED_LIBS AND NOT SHARED_LIBS_SUPPORTED)
+    message(FATAL_ERROR "AMReX_BUILD_SHARED_LIBS requested but not supported by platform")
+endif()
+print_option( AMReX_BUILD_SHARED_LIBS )
 
 #
 # Option to control generation of install targets
@@ -113,62 +129,88 @@ endif ()
 
 if (NOT AMReX_GPU_BACKEND STREQUAL NONE)
    message( STATUS "   AMReX_GPU_BACKEND = ${AMReX_GPU_BACKEND}")
+
+   # We might set different default for different GPUs in the future.
+   set(AMReX_GPU_MAX_THREADS_DEFAULT "256")
+   set(AMReX_GPU_MAX_THREADS ${AMReX_GPU_MAX_THREADS_DEFAULT} CACHE STRING
+       "Maximum number of GPU threads per block" )
+   message( STATUS "   AMReX_GPU_MAX_THREADS = ${AMReX_GPU_MAX_THREADS}")
 endif ()
 
 # Legacy variables for internal use only
 if (AMReX_GPU_BACKEND STREQUAL SYCL)
-   set(AMReX_DPCPP ON )
+   set(AMReX_SYCL  ON )
    set(AMReX_CUDA  OFF)
    set(AMReX_HIP   OFF)
 elseif (AMReX_GPU_BACKEND STREQUAL CUDA)
-   set(AMReX_DPCPP OFF)
+   set(AMReX_SYCL  OFF)
    set(AMReX_CUDA  ON )
    set(AMReX_HIP   OFF)
 elseif (AMReX_GPU_BACKEND STREQUAL HIP)
-   set(AMReX_DPCPP OFF)
+   set(AMReX_SYCL  OFF)
    set(AMReX_CUDA  OFF)
    set(AMReX_HIP   ON )
 else ()
-   set(AMReX_DPCPP OFF)
+   set(AMReX_SYCL  OFF)
    set(AMReX_CUDA  OFF)
    set(AMReX_HIP   OFF)
 endif ()
 
 # --- SYCL ---
-if (AMReX_DPCPP)
-   set(_valid_dpcpp_compiler_ids Clang IntelClang IntelDPCPP IntelLLVM)
-   if (NOT (CMAKE_CXX_COMPILER_ID IN_LIST _valid_dpcpp_compiler_ids) )
+if (AMReX_SYCL)
+   set(_valid_sycl_compiler_ids Clang IntelClang IntelDPCPP IntelLLVM)
+   if (NOT (CMAKE_CXX_COMPILER_ID IN_LIST _valid_sycl_compiler_ids) )
       message(WARNING "\nAMReX_GPU_BACKEND=${AMReX_GPU_BACKEND} is tested with "
-         "DPCPP. Verify '${CMAKE_CXX_COMPILER_ID}' is correct and potentially "
-         "set CMAKE_CXX_COMPILER=dpcpp.")
+         "Intel oneAPI. Verify '${CMAKE_CXX_COMPILER_ID}' is correct and potentially "
+         "set CMAKE_CXX_COMPILER=icpx.")
    endif ()
-   unset(_valid_dpcpp_compiler_ids)
+   unset(_valid_sycl_compiler_ids)
+
+   set(AMReX_SYCL_SUB_GROUP_SIZE_DEFAULT 32)
+   set(AMReX_SYCL_SUB_GROUP_SIZE_VALUES 16 32)
+   set(AMReX_SYCL_SUB_GROUP_SIZE ${AMReX_SYCL_SUB_GROUP_SIZE_DEFAULT} CACHE STRING
+       "SYCL sub-group size")
+   if (NOT AMReX_SYCL_SUB_GROUP_SIZE IN_LIST AMReX_SYCL_SUB_GROUP_SIZE_VALUES)
+      message(FATAL_ERROR "AMReX_SYCL_SUB_GROUP_SIZE=${AMReX_SYCL_SUB_GROUP_SIZE} not supported."
+              " Must be one of ${AMReX_SYCL_SUB_GROUP_SIZE_VALUES}")
+   endif()
+   mark_as_advanced(AMReX_SYCL_SUB_GROUP_SIZE)
 endif ()
 
-cmake_dependent_option( AMReX_DPCPP_AOT  "Enable DPCPP ahead-of-time compilation (WIP)"  OFF
+cmake_dependent_option( AMReX_SYCL_AOT  "Enable SYCL ahead-of-time compilation (WIP)"  OFF
    "AMReX_GPU_BACKEND STREQUAL SYCL" OFF)
-print_option( AMReX_DPCPP_AOT )
+print_option( AMReX_SYCL_AOT )
 
-cmake_dependent_option( AMReX_DPCPP_SPLIT_KERNEL "Enable DPCPP kernel splitting"  ON
+cmake_dependent_option( AMReX_SYCL_SPLIT_KERNEL "Enable SYCL kernel splitting"  ON
    "AMReX_GPU_BACKEND STREQUAL SYCL" OFF)
-print_option(  AMReX_DPCPP_SPLIT_KERNEL )
+print_option(  AMReX_SYCL_SPLIT_KERNEL )
 
-cmake_dependent_option( AMReX_DPCPP_ONEDPL "Enable DPCPP's oneDPL algorithms"  OFF
+cmake_dependent_option( AMReX_SYCL_ONEDPL "Enable Intel's oneDPL algorithms"  OFF
    "AMReX_GPU_BACKEND STREQUAL SYCL" OFF)
-print_option(  AMReX_DPCPP_ONEDPL )
+print_option(  AMReX_SYCL_ONEDPL )
 
-if (AMReX_DPCPP)
+if (AMReX_SYCL)
    set(AMReX_INTEL_ARCH_DEFAULT "IGNORE")
    if (DEFINED ENV{AMREX_INTEL_ARCH})
       set(AMReX_INTEL_ARCH_DEFAULT "$ENV{AMREX_INTEL_ARCH}")
    endif()
 
    set(AMReX_INTEL_ARCH ${AMReX_INTEL_ARCH_DEFAULT} CACHE STRING
-      "INTEL GPU architecture (Must be provided if AMReX_GPU_BACKEND=SYCL and AMReX_DPCPP_AOT=ON)")
+      "INTEL GPU architecture (Must be provided if AMReX_GPU_BACKEND=SYCL and AMReX_SYCL_AOT=ON)")
 
-   if (AMReX_DPCPP_AOT AND NOT AMReX_INTEL_ARCH)
-      message(FATAL_ERROR "\nMust specify AMReX_INTEL_ARCH if AMReX_GPU_BACKEND=SYCL and AMReX_DPCPP_AOT=ON\n")
+   if (AMReX_SYCL_AOT AND NOT AMReX_INTEL_ARCH)
+      message(FATAL_ERROR "\nMust specify AMReX_INTEL_ARCH if AMReX_GPU_BACKEND=SYCL and AMReX_SYCL_AOT=ON\n")
    endif()
+
+   if (AMReX_SYCL_AOT)
+      set(AMReX_SYCL_AOT_GRF_MODE_VALUES Default Large AutoLarge)
+      set(AMReX_SYCL_AOT_GRF_MODE Default CACHE STRING "SYCL AOT General Register File Mode")
+      set_property(CACHE AMReX_SYCL_AOT_GRF_MODE PROPERTY STRINGS ${AMReX_SYCL_AOT_GRF_MODE_VALUES})
+      if (NOT AMReX_SYCL_AOT_GRF_MODE IN_LIST AMReX_SYCL_AOT_GRF_MODE_VALUES)
+         message(FATAL_ERROR "AMReX_SYCL_AOT_GRF_MODE (${AMReX_SYCL_AOT_GRF_MODE}) must be one of ${AMReX_SYCL_AOT_GRF_MODE_VALUES}")
+      endif()
+   endif()
+
 endif ()
 
 # --- HIP ----
@@ -283,12 +325,12 @@ print_option( AMReX_ASCENT )
 
 # Hypre
 cmake_dependent_option(AMReX_HYPRE "Enable Hypre interfaces" OFF
-   "AMReX_LINEAR_SOLVERS" OFF)
+   "AMReX_LINEAR_SOLVERS;NOT AMReX_SPACEDIM EQUAL 1" OFF)
 print_option(AMReX_HYPRE)
 
 # PETSc
 cmake_dependent_option(AMReX_PETSC "Enable PETSc interfaces" OFF
-   "AMReX_LINEAR_SOLVERS" OFF )
+   "AMReX_LINEAR_SOLVERS;NOT AMReX_SPACEDIM EQUAL 1" OFF )
 print_option(AMReX_PETSC)
 
 # HDF5
@@ -403,10 +445,20 @@ option(AMReX_DIFFERENT_COMPILER
    "Allow an application to use a different compiler than the one used to build AMReX" OFF)
 print_option(AMReX_DIFFERENT_COMPILER)
 
-if (BUILD_SHARED_LIBS AND NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux") )
+if (AMReX_BUILD_SHARED_LIBS AND NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux") )
    option(AMReX_PROBINIT "Enable support for probin file" OFF)
 else ()
    cmake_dependent_option(AMReX_PROBINIT "Enable support for probin file" ON
        "AMReX_AMRLEVEL" OFF)
 endif ()
 print_option(AMReX_PROBINIT)
+
+
+#
+# Static code analysis  ===============================================
+#
+option(AMReX_CLANG_TIDY "Enable clang-tidy analysis" OFF)
+print_option(AMReX_CLANG_TIDY)
+cmake_dependent_option(AMReX_CLANG_TIDY_WERROR "Treat clang-tidy warnings as errors" OFF
+   "AMReX_CLANG_TIDY" OFF)
+print_option(AMReX_CLANG_TIDY_WERROR)

@@ -175,7 +175,7 @@ FabArray<FAB>::FillBoundary_finish ()
     if (!fbd) { n_filled = IntVect::TheZeroVector(); return; }
 
     const FB* TheFB = fbd->fb;
-    const int N_rcvs = TheFB->m_RcvTags->size();
+    const auto N_rcvs = static_cast<int>(TheFB->m_RcvTags->size());
     if (N_rcvs > 0)
     {
         Vector<const CopyComTagsContainer*> recv_cctc(N_rcvs,nullptr);
@@ -233,7 +233,7 @@ FabArray<FAB>::FillBoundary_finish ()
         }
     }
 
-    const int N_snds = TheFB->m_SndTags->size();
+    const auto N_snds = static_cast<int>(TheFB->m_SndTags->size());
     if (N_snds > 0) {
         Vector<MPI_Status> stats(fbd->send_reqs.size());
         ParallelDescriptor::Waitall(fbd->send_reqs, stats);
@@ -246,6 +246,7 @@ FabArray<FAB>::FillBoundary_finish ()
 #endif
 }
 
+// \cond CODEGEN
 template <class FAB>
 void
 FabArray<FAB>::ParallelCopy (const FabArray<FAB>& src,
@@ -321,7 +322,7 @@ FabArray<FAB>::ParallelCopy_nowait (const FabArray<FAB>& src,
 
     AMREX_ASSERT_WITH_MESSAGE(!pcd, "ParallelCopy_nowait() called when comm operation already in progress.");
 
-    if (size() == 0 || src.size() == 0) {
+    if (empty() || src.empty()) {
         return;
     }
 
@@ -504,8 +505,8 @@ FabArray<FAB>::ParallelCopy_finish ()
 
     const CPC* thecpc = pcd->cpc;
 
-    const int N_snds = thecpc->m_SndTags->size();
-    const int N_rcvs = thecpc->m_RcvTags->size();
+    const auto N_snds = static_cast<int>(thecpc->m_SndTags->size());
+    const auto N_rcvs = static_cast<int>(thecpc->m_RcvTags->size());
 
     if (N_rcvs > 0)
     {
@@ -610,7 +611,7 @@ FabArray<FAB>::copyTo (FAB& dest, int scomp, int dcomp, int ncomp, int nghost) c
     }
 #endif
 }
-
+// \endcond
 #ifdef BL_USE_MPI
 template <class FAB>
 template <typename BUF>
@@ -645,7 +646,7 @@ FabArray<FAB>::PrepareSendBuffers (const MapOfCopyComTagContainers&     SndTags,
     send_rank.clear();
     send_reqs.clear();
     send_cctc.clear();
-    const int N_snds = SndTags.size();
+    const auto N_snds = SndTags.size();
     if (N_snds == 0) return;
     send_data.reserve(N_snds);
     send_size.reserve(N_snds);
@@ -685,7 +686,7 @@ FabArray<FAB>::PrepareSendBuffers (const MapOfCopyComTagContainers&     SndTags,
     if (total_volume > 0)
     {
         the_send_data = static_cast<char*>(amrex::The_FA_Arena()->alloc(total_volume));
-        for (int i = 0, N = send_size.size(); i < N; ++i) {
+        for (int i = 0, N = static_cast<int>(send_size.size()); i < N; ++i) {
             send_data[i] = the_send_data + offset[i];
         }
     } else {
@@ -703,7 +704,7 @@ FabArray<FAB>::PostSnds (Vector<char*> const&       send_data,
 {
     MPI_Comm comm = ParallelContext::CommunicatorSub();
 
-    const int N_snds = send_reqs.size();
+    const auto N_snds = static_cast<int>(send_reqs.size());
     for (int j = 0; j < N_snds; ++j)
     {
         if (send_size[j] > 0) {
@@ -772,7 +773,7 @@ FabArray<FAB>::PostRcvs (const MapOfCopyComTagContainers&  RcvTags,
         recv_reqs.push_back(MPI_REQUEST_NULL);
     }
 
-    const int nrecv = recv_from.size();
+    const auto nrecv = static_cast<int>(recv_from.size());
 
     MPI_Comm comm = ParallelContext::CommunicatorSub();
 

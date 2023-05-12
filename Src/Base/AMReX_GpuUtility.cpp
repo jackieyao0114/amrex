@@ -5,7 +5,7 @@
 #include <omp.h>
 #endif
 
-namespace amrex {
+namespace amrex { // NOLINT(modernize-concat-nested-namespaces)
 
 #ifdef AMREX_USE_GPU
 
@@ -33,7 +33,7 @@ StreamIter::StreamIter (const int n, const StreamItInfo& info, bool is_thread_sa
 }
 
 void
-StreamIter::init() noexcept
+StreamIter::init () noexcept // NOLINT
 {
     amrex::ignore_unused(m_threadsafe);
     amrex::ignore_unused(m_sync);
@@ -62,10 +62,14 @@ StreamIter::init() noexcept
 #endif
 }
 
-StreamIter::~StreamIter () {
+StreamIter::~StreamIter () { // NOLINT(modernize-use-equals-default)
 #ifdef AMREX_USE_GPU
     if (m_sync) {
-        Gpu::streamSynchronizeAll();
+        const int nstreams = std::min(m_n, Gpu::numGpuStreams());
+        for (int i = 0; i < nstreams; ++i) {
+            Gpu::Device::setStreamIndex(i);
+            Gpu::streamSynchronize();
+        }
     }
     AMREX_GPU_ERROR_CHECK();
     Gpu::Device::resetStreamIndex();

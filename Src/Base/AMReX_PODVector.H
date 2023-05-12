@@ -88,35 +88,40 @@ namespace amrex
         }
 
         template <typename T>
-        typename std::enable_if<RunOnGpu<T>::value && !IsPolymorphicArenaAllocator<T>::value>::type
+        std::enable_if_t<RunOnGpu<T>::value && !IsPolymorphicArenaAllocator<T>::value, bool>
         memCopyImpl (void* dst, const void* src, std::size_t count, T& /*allocator*/)
         {
 #ifdef AMREX_USE_GPU
             Gpu::dtod_memcpy_async(dst, src, count);
+            return true;
 #else
             std::memcpy(dst, src, count);
+            return false;
 #endif
         }
 
         template <typename T>
-        typename std::enable_if<!RunOnGpu<T>::value && !IsPolymorphicArenaAllocator<T>::value>::type
+        std::enable_if_t<!RunOnGpu<T>::value && !IsPolymorphicArenaAllocator<T>::value, bool>
         memCopyImpl (void* dst, const void* src, std::size_t count, T& /*allocator*/)
         {
             std::memcpy(dst, src, count);
+            return false;
         }
 
         template <typename T>
-        typename std::enable_if<IsPolymorphicArenaAllocator<T>::value>::type
+        std::enable_if_t<IsPolymorphicArenaAllocator<T>::value, bool>
         memCopyImpl (void* dst, const void* src, std::size_t count, T& allocator)
         {
 #ifdef AMREX_USE_GPU
             if (allocator.arena()->isManaged() || allocator.arena()->isDevice()) {
                 Gpu::dtod_memcpy_async(dst, src, count);
+                return true;
             } else
 #endif
             {
                 amrex::ignore_unused(allocator);
                 std::memcpy(dst, src, count);
+                return false;
             }
         }
 
@@ -183,6 +188,7 @@ namespace amrex
         {
 #ifdef AMREX_USE_GPU
             Gpu::htod_memcpy_async(data, &(*list.begin()), list.size() * sizeof(U));
+            Gpu::streamSynchronize();
 #else
             std::memcpy(data, &(*list.begin()), list.size() * sizeof(U));
 #endif
@@ -202,6 +208,7 @@ namespace amrex
 #ifdef AMREX_USE_GPU
             if (allocator.arena()->isManaged() || allocator.arena()->isDevice()) {
                 Gpu::htod_memcpy_async(data, &(*list.begin()), list.size() * sizeof(U));
+                Gpu::streamSynchronize();
             } else
 #endif
             {
@@ -241,54 +248,50 @@ namespace amrex
 
     private:
         pointer m_data;
-        size_type m_size, m_capacity;
+        size_type m_size{0}, m_capacity{0};
 
     public:
         explicit PODVector () noexcept :
-        Allocator(), m_data(nullptr), m_size(0), m_capacity(0)
+        Allocator(), m_data(nullptr)
         {}
 
         explicit PODVector (const allocator_type& a_allocator) noexcept
-            : Allocator(a_allocator), m_data(nullptr), m_size(0), m_capacity(0)
+            : Allocator(a_allocator), m_data(nullptr)
         {}
 
         explicit PODVector (size_type a_size) noexcept
-            : m_data(nullptr), m_size(0), m_capacity(0)
+            : m_data(nullptr), m_size(a_size)
         {
             AllocateBuffer(GetNewCapacity(a_size));
-            m_size = a_size;
         }
 
         PODVector (size_type a_size, const value_type& a_value,
                    const allocator_type& a_allocator = Allocator()) noexcept
-            : Allocator(a_allocator), m_data(nullptr), m_size(0), m_capacity(0)
+            : Allocator(a_allocator), m_data(nullptr), m_size(a_size)
         {
             AllocateBuffer(GetNewCapacity(a_size));
-            m_size = a_size;
             detail::uninitializedFillNImpl<Allocator>(m_data, a_size, a_value, *this);
         }
 
         PODVector (std::initializer_list<T> a_initializer_list,
                    const allocator_type& a_allocator = Allocator()) noexcept
-            : Allocator(a_allocator), m_data(nullptr), m_size(0), m_capacity(0)
+            : Allocator(a_allocator), m_data(nullptr), m_size(a_initializer_list.size())
         {
-            size_type size = a_initializer_list.size();
-            AllocateBuffer(GetNewCapacity(size));
-            m_size = size;
+            AllocateBuffer(GetNewCapacity(m_size));
             detail::initFromListImpl<Allocator>(m_data, a_initializer_list, *this);
         }
 
         PODVector (const PODVector<T, Allocator>& a_vector) noexcept
-            : Allocator(a_vector), m_data(nullptr), m_size(0), m_capacity(0)
+            : Allocator(a_vector), m_data(nullptr), m_size(a_vector.size())
         {
             using namespace detail;
             AllocateBuffer(a_vector.capacity());
-            m_size = a_vector.size();
-            memCopyImpl<Allocator>(m_data, a_vector.m_data, a_vector.size() * sizeof(T), *this);
+            auto r = memCopyImpl<Allocator>(m_data, a_vector.m_data, a_vector.size() * sizeof(T), *this);
+            if (r) { Gpu::streamSynchronize(); }
         }
 
         PODVector (PODVector<T, Allocator>&& a_vector) noexcept
-            : Allocator(std::move(a_vector)),
+            : Allocator(static_cast<Allocator&&>(a_vector)),
               m_data(a_vector.m_data),
               m_size(a_vector.m_size),
               m_capacity(a_vector.m_capacity)
@@ -313,15 +316,17 @@ namespace amrex
 
         PODVector& operator= (const PODVector<T, Allocator>& a_vector) noexcept
         {
-            return CopyAssignmentDoIt(a_vector, typename std::allocator_traits<Allocator>::
-                                      propagate_on_container_copy_assignment());
+            CopyAssignmentDoIt(a_vector, typename std::allocator_traits<Allocator>::
+                               propagate_on_container_copy_assignment());
+            return *this;
         }
 
         PODVector& operator= (PODVector<T, Allocator>&& a_vector) noexcept
             (std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value)
         {
-            return MoveAssignmentDoIt(std::move(a_vector), typename std::allocator_traits<Allocator>::
-                                      propagate_on_container_move_assignment());
+            MoveAssignmentDoIt(std::move(a_vector), typename std::allocator_traits<Allocator>::
+                               propagate_on_container_move_assignment());
+            return *this;
         }
 
         iterator erase (const_iterator a_pos) noexcept
@@ -435,7 +440,8 @@ namespace amrex
             {
                 detail::memMoveImpl<Allocator>(const_cast<iterator>(a_pos)+count, a_pos, (end() - a_pos) * sizeof(T), *this);
                 m_size += count;
-            }        pointer dst = const_cast<iterator>(a_pos);
+            }
+            auto* dst = const_cast<iterator>(a_pos);
             detail::fillValuesImpl<Allocator>(dst, a_first, count, *this);
             return const_cast<iterator>(a_pos);
         }
@@ -460,17 +466,17 @@ namespace amrex
         {
             size_t count = std::distance(a_first, a_last);
             if (count > capacity()) AllocateBuffer(GetNewCapacity(count));
-            m_size = count;        pointer dst = const_cast<iterator>(m_data);
+            m_size = count;        auto dst = const_cast<iterator>(m_data);
             detail::fillValuesImpl<Allocator>(dst, a_first, count, *this);
         }
 
         // don't have the emplace methods, but not sure how often we use those.
-        allocator_type get_allocator () const noexcept { return *this; }
+        [[nodiscard]] allocator_type get_allocator () const noexcept { return *this; }
 
         void push_back (const T& a_value) noexcept
         {
             if (m_size == m_capacity) AllocateBuffer(GetNewCapacity(1));
-            m_data[m_size] = a_value;
+            detail::uninitializedFillNImpl<Allocator>(m_data+m_size, 1, a_value, *this);
             ++m_size;
         }
 
@@ -485,57 +491,57 @@ namespace amrex
 
         void clear () noexcept { m_size = 0; }
 
-        size_type size () const noexcept { return m_size; }
+        [[nodiscard]] size_type size () const noexcept { return m_size; }
 
-        size_type max_size () const noexcept { return Allocator::max_size(); }
+        [[nodiscard]] size_type max_size () const noexcept { return Allocator::max_size(); }
 
-        size_type capacity () const noexcept { return m_capacity; }
+        [[nodiscard]] size_type capacity () const noexcept { return m_capacity; }
 
-        bool empty () const noexcept { return m_size == 0; }
+        [[nodiscard]] bool empty () const noexcept { return m_size == 0; }
 
-        T& operator[] (size_type a_index) noexcept { return m_data[a_index]; }
+        [[nodiscard]] T& operator[] (size_type a_index) noexcept { return m_data[a_index]; }
 
-        const T& operator[] (size_type a_index) const noexcept { return m_data[a_index]; }
+        [[nodiscard]] const T& operator[] (size_type a_index) const noexcept { return m_data[a_index]; }
 
-        T& front () noexcept { return *m_data; }
+        [[nodiscard]] T& front () noexcept { return *m_data; }
 
-        const T& front () const noexcept { return *m_data; }
+        [[nodiscard]] const T& front () const noexcept { return *m_data; }
 
-        T& back () noexcept { return *(m_data + m_size - 1); }
+        [[nodiscard]] T& back () noexcept { return *(m_data + m_size - 1); }
 
-        const T& back () const noexcept { return *(m_data + m_size - 1); }
+        [[nodiscard]] const T& back () const noexcept { return *(m_data + m_size - 1); }
 
-        T* data () noexcept { return m_data; }
+        [[nodiscard]] T* data () noexcept { return m_data; }
 
-        const T* data () const noexcept { return m_data; }
+        [[nodiscard]] const T* data () const noexcept { return m_data; }
 
-        T* dataPtr () noexcept { return m_data; }
+        [[nodiscard]] T* dataPtr () noexcept { return m_data; }
 
-        const T* dataPtr () const noexcept { return m_data; }
+        [[nodiscard]] const T* dataPtr () const noexcept { return m_data; }
 
-        iterator begin () noexcept { return m_data; }
+        [[nodiscard]] iterator begin () noexcept { return m_data; }
 
-        const_iterator begin () const noexcept { return m_data; }
+        [[nodiscard]] const_iterator begin () const noexcept { return m_data; }
 
-        iterator end () noexcept { return m_data + m_size; }
+        [[nodiscard]] iterator end () noexcept { return m_data + m_size; }
 
-        const_iterator end () const noexcept { return m_data + m_size; }
+        [[nodiscard]] const_iterator end () const noexcept { return m_data + m_size; }
 
-        reverse_iterator rbegin () noexcept { return reverse_iterator(end()); }
+        [[nodiscard]] reverse_iterator rbegin () noexcept { return reverse_iterator(end()); }
 
-        const_reverse_iterator rbegin () const noexcept { return const_reverse_iterator(end()); }
+        [[nodiscard]] const_reverse_iterator rbegin () const noexcept { return const_reverse_iterator(end()); }
 
-        reverse_iterator rend () noexcept { return reverse_iterator(begin()); }
+        [[nodiscard]] reverse_iterator rend () noexcept { return reverse_iterator(begin()); }
 
-        const_reverse_iterator rend () const noexcept { return const_reverse_iterator(begin()); }
+        [[nodiscard]] const_reverse_iterator rend () const noexcept { return const_reverse_iterator(begin()); }
 
-        const_iterator cbegin () const noexcept { return m_data; }
+        [[nodiscard]] const_iterator cbegin () const noexcept { return m_data; }
 
-        const_iterator cend () const noexcept { return m_data + m_size; }
+        [[nodiscard]] const_iterator cend () const noexcept { return m_data + m_size; }
 
-        const_reverse_iterator crbegin () const noexcept { return const_reverse_iterator(end()); }
+        [[nodiscard]] const_reverse_iterator crbegin () const noexcept { return const_reverse_iterator(end()); }
 
-        const_reverse_iterator crend () const noexcept { return const_reverse_iterator(begin()); }
+        [[nodiscard]] const_reverse_iterator crend () const noexcept { return const_reverse_iterator(begin()); }
 
         void resize (size_type a_new_size) noexcept
         {
@@ -587,7 +593,7 @@ namespace amrex
     private:
 
         // this is where we would change the growth strategy
-        size_type GetNewCapacity (size_type a_num_to_be_added) const noexcept
+        [[nodiscard]] size_type GetNewCapacity (size_type a_num_to_be_added) const noexcept
         {
             size_type new_capacity = capacity();
 
@@ -609,8 +615,8 @@ namespace amrex
         {
             pointer new_data = allocate(a_capacity);
             if (m_data) {
-                detail::memCopyImpl<Allocator>(new_data, m_data, size() * sizeof(T), *this);
-                amrex::Gpu::streamSynchronize();
+                auto r = detail::memCopyImpl<Allocator>(new_data, m_data, size() * sizeof(T), *this);
+                if (r) { amrex::Gpu::streamSynchronize(); }
             }
             deallocate(m_data, capacity());
             m_data = new_data;
@@ -625,9 +631,9 @@ namespace amrex
             if (m_data)
             {
                 memCopyImpl<Allocator>(new_data, m_data, a_index * sizeof(T), *this);
-                memCopyImpl<Allocator>(new_data + a_index + a_count, m_data + a_index,
+                auto r = memCopyImpl<Allocator>(new_data + a_index + a_count, m_data + a_index,
                                        (size() - a_index)*sizeof(T), *this);
-                amrex::Gpu::streamSynchronize();
+                if (r) { amrex::Gpu::streamSynchronize(); }
             }
             deallocate(m_data, capacity());
             m_data = new_data;
@@ -640,7 +646,8 @@ namespace amrex
             const size_t other_size = a_vector.size();
             if ( other_size > capacity() ) { AllocateBuffer(other_size); }
             m_size = other_size;
-            detail::memCopyImpl<Allocator>(m_data, a_vector.m_data, size() * sizeof(T), *this);
+            auto r = detail::memCopyImpl<Allocator>(m_data, a_vector.m_data, size() * sizeof(T), *this);
+            if (r) { Gpu::streamSynchronize(); }
             return *this;
         }
 
@@ -655,7 +662,8 @@ namespace amrex
                 const size_t other_size = a_vector.size();
                 if ( other_size > capacity() ) { AllocateBuffer(other_size); }
                 m_size = other_size;
-                detail::memCopyImpl<Allocator>(m_data, a_vector.m_data, size() * sizeof(T), *this);
+                auto r = detail::memCopyImpl<Allocator>(m_data, a_vector.m_data, size() * sizeof(T), *this);
+                if (r) { Gpu::streamSynchronize(); }
                 Allocator::operator=(static_cast<Allocator const&>(a_vector));
                 return *this;
             }

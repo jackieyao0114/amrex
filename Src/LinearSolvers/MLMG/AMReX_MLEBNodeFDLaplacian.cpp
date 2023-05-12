@@ -27,9 +27,6 @@ MLEBNodeFDLaplacian::MLEBNodeFDLaplacian (
     define(a_geom, a_grids, a_dmap, a_info);
 }
 
-MLEBNodeFDLaplacian::~MLEBNodeFDLaplacian ()
-{}
-
 void
 MLEBNodeFDLaplacian::setSigma (Array<Real,AMREX_SPACEDIM> const& a_sigma) noexcept
 {
@@ -39,7 +36,7 @@ MLEBNodeFDLaplacian::setSigma (Array<Real,AMREX_SPACEDIM> const& a_sigma) noexce
 }
 
 void
-MLEBNodeFDLaplacian::setRZ (bool flag)
+MLEBNodeFDLaplacian::setRZ (bool flag) // NOLINT
 {
 #if (AMREX_SPACEDIM == 2)
     m_rz = flag;
@@ -49,7 +46,7 @@ MLEBNodeFDLaplacian::setRZ (bool flag)
 }
 
 void
-MLEBNodeFDLaplacian::setAlpha (Real a_alpha)
+MLEBNodeFDLaplacian::setAlpha (Real a_alpha) // NOLINT
 {
 #if (AMREX_SPACEDIM == 2)
     m_rz_alpha = a_alpha;
@@ -88,7 +85,7 @@ MLEBNodeFDLaplacian::define (const Vector<Geometry>& a_geom,
     }
 
     Vector<FabFactory<FArrayBox> const*> _factory;
-    for (auto x : a_factory) {
+    for (const auto *x : a_factory) {
         _factory.push_back(static_cast<FabFactory<FArrayBox> const*>(x));
     }
 
@@ -257,7 +254,7 @@ MLEBNodeFDLaplacian::prepareForSolve ()
     // compGrad relies on the negative value to detect EB.
     for (int amrlev = 0; amrlev < m_num_amr_levels; ++amrlev) {
         for (int mglev = 0; mglev < m_num_mg_levels[amrlev]; ++mglev) {
-            auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
+            const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
             auto const& levset_mf = factory->getLevelSet();
             auto const& levset_ar = levset_mf.const_arrays();
             auto& dmask_mf = *m_dirichlet_mask[amrlev][mglev];
@@ -319,13 +316,10 @@ MLEBNodeFDLaplacian::prepareForSolve ()
 
 #ifdef AMREX_USE_EB
 void
-MLEBNodeFDLaplacian::scaleRHS (int amrlev, Any& a_rhs) const
+MLEBNodeFDLaplacian::scaleRHS (int amrlev, MultiFab& rhs) const
 {
-    AMREX_ASSERT(a_rhs.is<MultiFab>());
-    auto& rhs = a_rhs.get<MultiFab>();
-
     auto const& dmask = *m_dirichlet_mask[amrlev][0];
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
     auto const& edgecent = factory->getEdgeCent();
 
 #ifdef AMREX_USE_OMP
@@ -362,7 +356,6 @@ MLEBNodeFDLaplacian::Fapply (int amrlev, int mglev, MultiFab& out, const MultiFa
     const auto dx1 = m_geom[amrlev][mglev].CellSize(1)/std::sqrt(m_sigma[1]);
     const auto xlo = m_geom[amrlev][mglev].ProbLo(0);
     const auto alpha = m_rz_alpha;
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(alpha == 0._rt, "alpha != 0 not implemented yet");
 #endif
     AMREX_D_TERM(const Real bx = m_sigma[0]*dxinv[0]*dxinv[0];,
                  const Real by = m_sigma[1]*dxinv[1]*dxinv[1];,
@@ -372,8 +365,9 @@ MLEBNodeFDLaplacian::Fapply (int amrlev, int mglev, MultiFab& out, const MultiFa
 
 #ifdef AMREX_USE_EB
     const auto phieb = (m_in_solution_mode) ? m_s_phi_eb : Real(0.0);
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
     auto const& edgecent = factory->getEdgeCent();
+    auto const& levset_mf = factory->getLevelSet();
 #endif
 
 #ifdef AMREX_USE_OMP
@@ -391,21 +385,22 @@ MLEBNodeFDLaplacian::Fapply (int amrlev, int mglev, MultiFab& out, const MultiFa
             AMREX_D_TERM(Array4<Real const> const& ecx = edgecent[0]->const_array(mfi);,
                          Array4<Real const> const& ecy = edgecent[1]->const_array(mfi);,
                          Array4<Real const> const& ecz = edgecent[2]->const_array(mfi));
+            auto const& levset = levset_mf.const_array(mfi);
             if (phieb == std::numeric_limits<Real>::lowest()) {
                 auto const& phiebarr = m_phi_eb[amrlev].const_array(mfi);
 #if (AMREX_SPACEDIM == 2)
                 if (m_rz) {
                     AMREX_HOST_DEVICE_FOR_3D(box, i, j, k,
                     {
-                        mlebndfdlap_adotx_rz_eb(i,j,k,yarr,xarr,dmarr,ecx,ecy,
-                                                phiebarr, sig0, dx0, dx1, xlo);
+                        mlebndfdlap_adotx_rz_eb(i,j,k,yarr,xarr,levset,dmarr,ecx,ecy,
+                                                phiebarr, sig0, dx0, dx1, xlo, alpha);
                     });
                 } else
 #endif
                 {
                     AMREX_HOST_DEVICE_FOR_3D(box, i, j, k,
                     {
-                        mlebndfdlap_adotx_eb(i,j,k,yarr,xarr,dmarr,AMREX_D_DECL(ecx,ecy,ecz),
+                        mlebndfdlap_adotx_eb(i,j,k,yarr,xarr,levset,dmarr,AMREX_D_DECL(ecx,ecy,ecz),
                                              phiebarr, AMREX_D_DECL(bx,by,bz));
                     });
                 }
@@ -414,15 +409,15 @@ MLEBNodeFDLaplacian::Fapply (int amrlev, int mglev, MultiFab& out, const MultiFa
                 if (m_rz) {
                     AMREX_HOST_DEVICE_FOR_3D(box, i, j, k,
                     {
-                        mlebndfdlap_adotx_rz_eb(i,j,k,yarr,xarr,dmarr,ecx,ecy,
-                                                phieb, sig0, dx0, dx1, xlo);
+                        mlebndfdlap_adotx_rz_eb(i,j,k,yarr,xarr,levset,dmarr,ecx,ecy,
+                                                phieb, sig0, dx0, dx1, xlo, alpha);
                     });
                 } else
 #endif
                 {
                     AMREX_HOST_DEVICE_FOR_3D(box, i, j, k,
                     {
-                        mlebndfdlap_adotx_eb(i,j,k,yarr,xarr,dmarr,AMREX_D_DECL(ecx,ecy,ecz),
+                        mlebndfdlap_adotx_eb(i,j,k,yarr,xarr,levset,dmarr,AMREX_D_DECL(ecx,ecy,ecz),
                                              phieb, AMREX_D_DECL(bx,by,bz));
                     });
                 }
@@ -434,7 +429,7 @@ MLEBNodeFDLaplacian::Fapply (int amrlev, int mglev, MultiFab& out, const MultiFa
             if (m_rz) {
                 AMREX_HOST_DEVICE_FOR_3D(box, i, j, k,
                 {
-                    mlebndfdlap_adotx_rz(i,j,k,yarr,xarr,dmarr,sig0,dx0,dx1,xlo);
+                    mlebndfdlap_adotx_rz(i,j,k,yarr,xarr,dmarr,sig0,dx0,dx1,xlo,alpha);
                 });
             } else
 #endif
@@ -460,7 +455,6 @@ MLEBNodeFDLaplacian::Fsmooth (int amrlev, int mglev, MultiFab& sol, const MultiF
     const auto dx1 = m_geom[amrlev][mglev].CellSize(1)/std::sqrt(m_sigma[1]);
     const auto xlo = m_geom[amrlev][mglev].ProbLo(0);
     const auto alpha = m_rz_alpha;
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(alpha == 0._rt, "alpha != 0 not implemented yet");
 #endif
     AMREX_D_TERM(const Real bx = m_sigma[0]*dxinv[0]*dxinv[0];,
                  const Real by = m_sigma[1]*dxinv[1]*dxinv[1];,
@@ -474,8 +468,9 @@ MLEBNodeFDLaplacian::Fsmooth (int amrlev, int mglev, MultiFab& sol, const MultiF
         }
 
 #ifdef AMREX_USE_EB
-        auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
+        const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
         auto const& edgecent = factory->getEdgeCent();
+        auto const& levset_mf = factory->getLevelSet();
 #endif
 
 #ifdef AMREX_USE_OMP
@@ -493,19 +488,20 @@ MLEBNodeFDLaplacian::Fsmooth (int amrlev, int mglev, MultiFab& sol, const MultiF
                 AMREX_D_TERM(Array4<Real const> const& ecx = edgecent[0]->const_array(mfi);,
                              Array4<Real const> const& ecy = edgecent[1]->const_array(mfi);,
                              Array4<Real const> const& ecz = edgecent[2]->const_array(mfi));
+                auto const& levset = levset_mf.const_array(mfi);
 #if (AMREX_SPACEDIM == 2)
                 if (m_rz) {
                     AMREX_HOST_DEVICE_FOR_3D(box, i, j, k,
                     {
-                        mlebndfdlap_gsrb_rz_eb(i,j,k,solarr,rhsarr,dmskarr,ecx,ecy,
-                                               sig0, dx0, dx1, xlo, redblack);
+                        mlebndfdlap_gsrb_rz_eb(i,j,k,solarr,rhsarr,levset,dmskarr,ecx,ecy,
+                                               sig0, dx0, dx1, xlo, redblack, alpha);
                     });
                 } else
 #endif
                 {
                     AMREX_HOST_DEVICE_FOR_3D(box, i, j, k,
                     {
-                        mlebndfdlap_gsrb_eb(i,j,k,solarr,rhsarr,dmskarr,AMREX_D_DECL(ecx,ecy,ecz),
+                        mlebndfdlap_gsrb_eb(i,j,k,solarr,rhsarr,levset,dmskarr,AMREX_D_DECL(ecx,ecy,ecz),
                                             AMREX_D_DECL(bx,by,bz), redblack);
                     });
                 }
@@ -517,7 +513,7 @@ MLEBNodeFDLaplacian::Fsmooth (int amrlev, int mglev, MultiFab& sol, const MultiF
                     AMREX_HOST_DEVICE_FOR_3D(box, i, j, k,
                     {
                         mlebndfdlap_gsrb_rz(i,j,k,solarr,rhsarr,dmskarr,
-                                            sig0, dx0, dx1, xlo, redblack);
+                                            sig0, dx0, dx1, xlo, redblack, alpha);
                     });
                 } else
 #endif
@@ -564,7 +560,7 @@ MLEBNodeFDLaplacian::compGrad (int amrlev, const Array<MultiFab*,AMREX_SPACEDIM>
 #ifdef AMREX_USE_EB
     auto const& dmask = *m_dirichlet_mask[amrlev][mglev];
     const auto phieb = m_s_phi_eb;
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
     AMREX_ASSERT(factory);
     auto const& edgecent = factory->getEdgeCent();
 #endif
@@ -659,15 +655,15 @@ MLEBNodeFDLaplacian::fillRHS (MFIter const& /*mfi*/, Array4<int const> const& /*
 #endif
 
 void
-MLEBNodeFDLaplacian::postSolve (Vector<Any>& sol) const
+MLEBNodeFDLaplacian::postSolve (Vector<MultiFab>& sol) const
 {
 #ifdef AMREX_USE_EB
     for (int amrlev = 0; amrlev < m_num_amr_levels; ++amrlev) {
         const auto phieb = m_s_phi_eb;
-        auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+        const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
         auto const& levset_mf = factory->getLevelSet();
         auto const& levset_ar = levset_mf.const_arrays();
-        MultiFab& mf = sol[amrlev].get<MultiFab>();
+        MultiFab& mf = sol[amrlev];
         auto const& sol_ar = mf.arrays();
         if (phieb == std::numeric_limits<Real>::lowest()) {
             auto const& phieb_ar = m_phi_eb[amrlev].const_arrays();

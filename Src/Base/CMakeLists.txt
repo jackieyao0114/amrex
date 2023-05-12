@@ -15,10 +15,12 @@ target_sources( amrex
    AMReX_Vector.H
    AMReX_TableData.H
    AMReX_Tuple.H
+   AMReX_TypeList.H
    AMReX.cpp
    AMReX_error_fi.cpp
    AMReX_Version.cpp
    AMReX.H
+   AMReX_Demangle.H
    AMReX_Exception.H
    AMReX_Extension.H
    AMReX_PODVector.H
@@ -100,6 +102,7 @@ target_sources( amrex
    AMReX_IndexType.H
    AMReX_IndexType.cpp
    AMReX_Loop.H
+   AMReX_Loop.nolint.H
    AMReX_Orientation.H
    AMReX_Orientation.cpp
    AMReX_Periodicity.H
@@ -200,9 +203,12 @@ target_sources( amrex
    AMReX_GpuControl.H
    AMReX_GpuControl.cpp
    AMReX_GpuLaunch.H
+   AMReX_GpuLaunch.nolint.H
    AMReX_GpuLaunchGlobal.H
    AMReX_GpuLaunchMacrosG.H
+   AMReX_GpuLaunchMacrosG.nolint.H
    AMReX_GpuLaunchMacrosC.H
+   AMReX_GpuLaunchMacrosC.nolint.H
    AMReX_GpuLaunchFunctsG.H
    AMReX_GpuLaunchFunctsC.H
    AMReX_GpuError.H
@@ -243,8 +249,10 @@ target_sources( amrex
    Parser/AMReX_Parser_Y.cpp
    Parser/AMReX_Parser_Y.H
    Parser/amrex_parser.lex.cpp
+   Parser/amrex_parser.lex.nolint.H
    Parser/amrex_parser.lex.h
    Parser/amrex_parser.tab.cpp
+   Parser/amrex_parser.tab.nolint.H
    Parser/amrex_parser.tab.h
    Parser/AMReX_IParser.cpp
    Parser/AMReX_IParser.H
@@ -253,8 +261,10 @@ target_sources( amrex
    Parser/AMReX_IParser_Y.cpp
    Parser/AMReX_IParser_Y.H
    Parser/amrex_iparser.lex.cpp
+   Parser/amrex_iparser.lex.nolint.H
    Parser/amrex_iparser.lex.h
    Parser/amrex_iparser.tab.cpp
+   Parser/amrex_iparser.tab.nolint.H
    Parser/amrex_iparser.tab.h
    # Forward declaration -----------------------------------------------------
    AMReX_BaseFwd.H

@@ -7,12 +7,15 @@
 #include <cstddef>
 #include <set>
 #include <vector>
+#include <map>
 #include <mutex>
 #include <unordered_set>
 #include <functional>
 #include <string>
 
 namespace amrex {
+
+struct MemStat;
 
 /**
 * \brief A Concrete Class for Dynamic Memory Management using first fit.
@@ -46,7 +49,7 @@ public:
     * \brief Free up allocated memory.  Merge neighboring free memory chunks
     * into largest possible chunk.
     */
-    virtual void free (void* ap) override final;
+    virtual void free (void* vp) override final;
 
     virtual std::size_t freeUnused () override final;
 
@@ -57,6 +60,12 @@ public:
      * system.
      */
     virtual bool hasFreeDeviceMemory (std::size_t sz) override;
+
+    /**
+     * \brief Add this Arena to the list of Arenas that are profiled by TinyProfiler.
+     * \param memory_name The name of this arena in the TinyProfiler output.
+     */
+    virtual void registerForProfiling (const std::string& memory_name) override;
 
     //! The current amount of heap space used by the CArena object.
     std::size_t heap_space_used () const noexcept;
@@ -82,14 +91,14 @@ protected:
     class Node
     {
     public:
-        Node (void* a_block, void* a_owner, std::size_t a_size) noexcept
+        Node (void* a_block, void* a_owner, std::size_t a_size, MemStat* a_stat=nullptr) noexcept
             :
-            m_block(a_block), m_owner(a_owner), m_size(a_size) {}
+            m_block(a_block), m_owner(a_owner), m_size(a_size), m_stat(a_stat) {}
 
         //! The "less-than" operator.
         bool operator< (const Node& rhs) const noexcept
         {
-            return m_block < rhs.m_block;
+            return std::less<void*>()(m_block, rhs.m_block);
         }
 
         //! The equality operator.
@@ -116,6 +125,9 @@ protected:
             return m_owner == rhs.m_owner;
         }
 
+        //! Get the MemStat object of the function where this block was allocated.
+        MemStat* mem_stat () const { return m_stat; }
+
         struct hash {
             std::size_t operator() (const Node& n) const noexcept {
                 return std::hash<void*>{}(n.m_block);
@@ -129,6 +141,8 @@ protected:
         void* m_owner;
         //! The size of the block we represent.
         std::size_t m_size;
+        //! Used for profiling if this Node represents a user allocated block of memory.
+        MemStat* m_stat;
     };
 
     /**
@@ -155,9 +169,14 @@ protected:
     //! The minimal size of hunks to request from system
     std::size_t m_hunk;
     //! The amount of heap space currently allocated.
-    std::size_t m_used;
+    std::size_t m_used{0};
     //! The amount of memory given out via alloc().
-    std::size_t m_actually_used;
+    std::size_t m_actually_used{0};
+    //! If this arena is profiled by TinyProfiler
+    bool m_do_profiling = false;
+    //! Data structure used for profiling with TinyProfiler
+    std::map<std::string, MemStat> m_profiling_stats;
+
 
     std::mutex carena_mutex;
 };

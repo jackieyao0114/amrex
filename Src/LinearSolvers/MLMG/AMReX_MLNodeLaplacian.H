@@ -14,7 +14,7 @@ class MLNodeLaplacian
 {
 public :
 
-    MLNodeLaplacian () noexcept {}
+    MLNodeLaplacian () = default;
     MLNodeLaplacian (const Vector<Geometry>& a_geom,
                      const Vector<BoxArray>& a_grids,
                      const Vector<DistributionMapping>& a_dmap,
@@ -29,7 +29,7 @@ public :
                      const Vector<EBFArrayBoxFactory const*>& a_factory,
                      Real a_const_sigma = Real(0.0));
 #endif
-    virtual ~MLNodeLaplacian ();
+    virtual ~MLNodeLaplacian () = default;
 
     MLNodeLaplacian (const MLNodeLaplacian&) = delete;
     MLNodeLaplacian (MLNodeLaplacian&&) = delete;
@@ -116,10 +116,10 @@ public :
     }
     virtual void getFluxes (const Vector<MultiFab*>& a_flux,
                             const Vector<MultiFab*>& a_sol) const final override;
-    virtual void unimposeNeumannBC (int amrlev, Any& rhs) const final override;
+    virtual void unimposeNeumannBC (int amrlev, MultiFab& rhs) const final override;
     virtual Vector<Real> getSolvabilityOffset (int amrlev, int mglev,
-                                               Any const& rhs) const override;
-    virtual void fixSolvabilityByOffset (int amrlev, int mglev, Any& rhs,
+                                               MultiFab const& rhs) const override;
+    virtual void fixSolvabilityByOffset (int amrlev, int mglev, MultiFab& rhs,
                                          Vector<Real> const& offset) const override;
 
     virtual void compGrad (int /*amrlev*/, const Array<MultiFab*,AMREX_SPACEDIM>& /*grad*/,

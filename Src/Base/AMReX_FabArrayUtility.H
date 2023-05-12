@@ -1096,7 +1096,9 @@ Subtract (FabArray<FAB>& dst, FabArray<FAB> const& src, int srccomp, int dstcomp
         {
             dstfa[box_no](i,j,k,n+dstcomp) -= srcfa[box_no](i,j,k,n+srccomp);
         });
-        Gpu::streamSynchronize();
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
     } else
 #endif
     {
@@ -1142,7 +1144,9 @@ Multiply (FabArray<FAB>& dst, FabArray<FAB> const& src, int srccomp, int dstcomp
         {
             dstfa[box_no](i,j,k,n+dstcomp) *= srcfa[box_no](i,j,k,n+srccomp);
         });
-        Gpu::streamSynchronize();
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
     } else
 #endif
     {
@@ -1188,7 +1192,9 @@ Divide (FabArray<FAB>& dst, FabArray<FAB> const& src, int srccomp, int dstcomp, 
         {
             dstfa[box_no](i,j,k,n+dstcomp) /= srcfa[box_no](i,j,k,n+srccomp);
         });
-        Gpu::streamSynchronize();
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
     } else
 #endif
     {
@@ -1230,9 +1236,11 @@ Abs (FabArray<FAB>& fa, int icomp, int numcomp, const IntVect& nghost)
         ParallelFor(fa, nghost, numcomp,
         [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
         {
-            fabarr[box_no](i,j,k,n+icomp) = amrex::Math::abs(fabarr[box_no](i,j,k,n+icomp));
+            fabarr[box_no](i,j,k,n+icomp) = std::abs(fabarr[box_no](i,j,k,n+icomp));
         });
-        Gpu::streamSynchronize();
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
     } else
 #endif
     {
@@ -1247,7 +1255,7 @@ Abs (FabArray<FAB>& fa, int icomp, int numcomp, const IntVect& nghost)
                 auto const& fab = fa.array(mfi);
                 AMREX_HOST_DEVICE_PARALLEL_FOR_4D( bx, numcomp, i, j, k, n,
                 {
-                    fab(i,j,k,n+icomp) = amrex::Math::abs(fab(i,j,k,n+icomp));
+                    fab(i,j,k,n+icomp) = std::abs(fab(i,j,k,n+icomp));
                 });
             }
         }
@@ -1318,7 +1326,9 @@ OverrideSync_nowait (FabArray<FAB> & fa, FabArray<IFAB> const& msk, const Period
         {
             if (!ifabarr[box_no](i,j,k)) fabarr[box_no](i,j,k,n) = 0;
         });
-        Gpu::streamSynchronize();
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
     } else
 #endif
     {
@@ -1483,8 +1493,8 @@ indexFromValue (FabArray<FAB> const& mf, int comp, IntVect const& nghost,
                 bool old;
 // we should be able to test on _OPENMP < 201107 for capture (version 3.1)
 // but we must work around a bug in gcc < 4.9
-// And, with NVHPC 21.9, we see an ICE with the atomic capture (NV bug: #3390723)
-#if defined(AMREX_USE_OMP) && defined(_OPENMP) && (_OPENMP < 201307 || defined(__NVCOMPILER)) // OpenMP 4.0
+// And, with NVHPC 21.9 to <23.1, we saw an ICE with the atomic capture (NV bug: #3390723)
+#if defined(AMREX_USE_OMP) && defined(_OPENMP) && (_OPENMP < 201307 || (defined(__NVCOMPILER) && __NVCOMPILER_MAJOR__ < 23)) // OpenMP 4.0
 #pragma omp critical (amrex_indexfromvalue)
 #elif defined(AMREX_USE_OMP)
 #pragma omp atomic capture
@@ -1500,6 +1510,70 @@ indexFromValue (FabArray<FAB> const& mf, int comp, IntVect const& nghost,
     }
 
     return loc;
+}
+
+/**
+ * \brief Compute dot products of two FabArrays
+ *
+ * \param x      first FabArray
+ * \param xcomp  starting component of x
+ * \param y      second FabArray
+ * \param ycomp  starting component of y
+ * \param ncomp  number of components
+ * \param nghost number of ghost cells
+ * \param local  If true, MPI communciation is skipped.
+ */
+template <typename FAB, std::enable_if_t<IsBaseFab<FAB>::value,int> FOO = 0>
+typename FAB::value_type
+Dot (FabArray<FAB> const& x, int xcomp, FabArray<FAB> const& y, int ycomp, int ncomp,
+     IntVect const& nghost, bool local = false)
+{
+    BL_ASSERT(x.boxArray() == y.boxArray());
+    BL_ASSERT(x.DistributionMap() == y.DistributionMap());
+    BL_ASSERT(x.nGrowVect().allGE(nghost) && y.nGrowVect().allGE(nghost));
+
+    BL_PROFILE("amrex::Dot()");
+
+    using T = typename FAB::value_type;
+    auto sm = T(0.0);
+#ifdef AMREX_USE_GPU
+    if (Gpu::inLaunchRegion()) {
+        auto const& xma = x.const_arrays();
+        auto const& yma = y.const_arrays();
+        sm = ParReduce(TypeList<ReduceOpSum>{}, TypeList<T>{}, x, nghost,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k) noexcept -> GpuTuple<T>
+        {
+            auto t = T(0.0);
+            auto const& xfab = xma[box_no];
+            auto const& yfab = yma[box_no];
+            for (int n = 0; n < ncomp; ++n) {
+                t += xfab(i,j,k,xcomp+n) * yfab(i,j,k,ycomp+n);
+            }
+            return t;
+        });
+    } else
+#endif
+    {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (!system::regtest_reduction) reduction(+:sm)
+#endif
+        for (MFIter mfi(x,true); mfi.isValid(); ++mfi)
+        {
+            Box const& bx = mfi.growntilebox(nghost);
+            auto const& xfab = x.const_array(mfi);
+            auto const& yfab = y.const_array(mfi);
+            AMREX_LOOP_4D(bx, ncomp, i, j, k, n,
+            {
+                sm += xfab(i,j,k,xcomp+n) * yfab(i,j,k,ycomp+n);
+            });
+        }
+    }
+
+    if (!local) {
+        ParallelAllReduce::Sum(sm, ParallelContext::CommunicatorSub());
+    }
+
+    return sm;
 }
 
 }

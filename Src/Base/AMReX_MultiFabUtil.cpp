@@ -7,7 +7,7 @@ namespace {
 
     using namespace amrex;
 
-    static Box
+    Box
     getIndexBox(const RealBox& real_box, const Geometry& geom) {
         IntVect slice_lo, slice_hi;
 
@@ -22,7 +22,7 @@ namespace {
         return Box(slice_lo, slice_hi) & geom.Domain();
     }
 
-    static
+
     std::unique_ptr<MultiFab> allocateSlice(int dir, const MultiFab& cell_centered_data,
                                             int ncomp, const Geometry& geom, Real dir_coord,
                                             Vector<int>& slice_to_full_ba_map) {
@@ -34,7 +34,7 @@ namespace {
         Box slice_box = getIndexBox(real_slice, geom);
 
         // define the multifab that stores slice
-        BoxArray ba = cell_centered_data.boxArray();
+        BoxArray const& ba = cell_centered_data.boxArray();
         const DistributionMapping& dm = cell_centered_data.DistributionMap();
         std::vector< std::pair<int, Box> > isects;
         ba.intersections(slice_box, isects, false, 0);
@@ -45,7 +45,7 @@ namespace {
             boxes.push_back(is.second);
             slice_to_full_ba_map.push_back(is.first);
         }
-        BoxArray slice_ba(&boxes[0], boxes.size());
+        BoxArray slice_ba(&boxes[0], static_cast<int>(boxes.size()));
         DistributionMapping slice_dmap(std::move(procs));
         std::unique_ptr<MultiFab> slice(new MultiFab(slice_ba, slice_dmap, ncomp, 0,
                                                      MFInfo(), cell_centered_data.Factory()));
@@ -67,7 +67,9 @@ namespace amrex
             {
                 amrex_avg_nd_to_cc(i, j, k, n, ccma[box_no], ndma[box_no], dcomp, scomp);
             });
-            Gpu::streamSynchronize();
+            if (!Gpu::inNoSyncRegion()) {
+                Gpu::streamSynchronize();
+            }
         } else
 #endif
         {
@@ -82,7 +84,7 @@ namespace amrex
 
                 AMREX_HOST_DEVICE_PARALLEL_FOR_4D( bx, ncomp, i, j, k, n,
                 {
-                    amrex_avg_nd_to_cc(i, j, k, n, ccarr, ndarr, dcomp, scomp);
+                    amrex_avg_nd_to_cc(i, j, k, n, ccarr, ndarr, dcomp, scomp); // NOLINT(readability-suspicious-call-argument)
                 });
             }
         }
@@ -107,7 +109,9 @@ namespace amrex
                                    AMREX_D_DECL(exma[box_no], eyma[box_no], ezma[box_no]),
                                    dcomp);
             });
-            Gpu::streamSynchronize();
+            if (!Gpu::inNoSyncRegion()) {
+                Gpu::streamSynchronize();
+            }
         } else
 #endif
         {
@@ -147,66 +151,6 @@ namespace amrex
                                    geom);
     }
 
-    void average_face_to_cellcenter (MultiFab& cc, int dcomp,
-                                     const Array<const MultiFab*,AMREX_SPACEDIM>& fc, int ngrow)
-    {
-        AMREX_ASSERT(cc.nComp() >= dcomp + AMREX_SPACEDIM);
-        AMREX_ASSERT(fc[0]->nComp() == 1);
-
-#ifdef AMREX_USE_GPU
-        if (Gpu::inLaunchRegion() && cc.isFusingCandidate()) {
-            auto const& ccma = cc.arrays();
-            AMREX_D_TERM(auto const& fxma = fc[0]->const_arrays();,
-                         auto const& fyma = fc[1]->const_arrays();,
-                         auto const& fzma = fc[2]->const_arrays(););
-            ParallelFor(cc, IntVect(ngrow),
-            [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k) noexcept
-            {
-#if (AMREX_SPACEDIM == 1)
-                GeometryData gd{};
-                gd.coord = 0;
-#endif
-                amrex_avg_fc_to_cc(i,j,k, ccma[box_no], AMREX_D_DECL(fxma[box_no],
-                                                                     fyma[box_no],
-                                                                     fzma[box_no]),
-                                   dcomp
-#if (AMREX_SPACEDIM == 1)
-                                   , gd
-#endif
-                    );
-            });
-            Gpu::streamSynchronize();
-        } else
-#endif
-        {
-#ifdef AMREX_USE_OMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-            for (MFIter mfi(cc,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box bx = mfi.growntilebox(ngrow);
-                Array4<Real> const& ccarr = cc.array(mfi);
-                AMREX_D_TERM(Array4<Real const> const& fxarr = fc[0]->const_array(mfi);,
-                             Array4<Real const> const& fyarr = fc[1]->const_array(mfi);,
-                             Array4<Real const> const& fzarr = fc[2]->const_array(mfi););
-
-#if (AMREX_SPACEDIM == 1)
-                AMREX_HOST_DEVICE_PARALLEL_FOR_3D( bx, i, j, k,
-                {
-                    GeometryData gd;
-                    gd.coord = 0;
-                    amrex_avg_fc_to_cc(i,j,k, ccarr, fxarr, dcomp, gd);
-                });
-#else
-                AMREX_HOST_DEVICE_PARALLEL_FOR_3D( bx, i, j, k,
-                {
-                    amrex_avg_fc_to_cc(i,j,k, ccarr, AMREX_D_DECL(fxarr,fyarr,fzarr), dcomp);
-                });
-#endif
-            }
-        }
-    }
-
     void average_face_to_cellcenter (MultiFab& cc,
                                      const Array<const MultiFab*,AMREX_SPACEDIM>& fc,
                                      const Geometry& geom)
@@ -235,7 +179,9 @@ namespace amrex
 #endif
                                    );
             });
-            Gpu::streamSynchronize();
+            if (!Gpu::inNoSyncRegion()) {
+                Gpu::streamSynchronize();
+            }
         } else
 #endif
         {
@@ -321,7 +267,9 @@ namespace amrex
                                    ccma[box_no], use_harmonic_averaging);
 #endif
             });
-            Gpu::streamSynchronize();
+            if (!Gpu::inNoSyncRegion()) {
+                Gpu::streamSynchronize();
+            }
         } else
 #endif
         {
@@ -384,7 +332,6 @@ namespace amrex
 
 #if (AMREX_SPACEDIM == 3)
         amrex::average_down(S_fine, S_crse, scomp, ncomp, ratio);
-        return;
 #else
 
         AMREX_ASSERT(S_crse.nComp() == S_fine.nComp());
@@ -413,7 +360,9 @@ namespace amrex
                 amrex_avgdown_with_vol(i,j,k,n,crsema[box_no],finema[box_no],finevolma[box_no],
                                        0,scomp,ratio);
             });
-            Gpu::streamSynchronize();
+            if (!Gpu::inNoSyncRegion()) {
+                Gpu::streamSynchronize();
+            }
         } else
 #endif
         {
@@ -438,17 +387,6 @@ namespace amrex
         S_crse.ParallelCopy(crse_S_fine,0,scomp,ncomp);
 #endif
    }
-
-// *************************************************************************************************************
-
-    // Average fine cell-based MultiFab onto crse cell-centered MultiFab.
-    // We do NOT assume that the coarse layout is a coarsened version of the fine layout.
-    // This version does NOT use volume-weighting
-    void average_down (const MultiFab& S_fine, MultiFab& S_crse, int scomp, int ncomp, int rr)
-    {
-         average_down(S_fine,S_crse,scomp,ncomp,rr*IntVect::TheUnitVector());
-    }
-
 
     void sum_fine_to_coarse(const MultiFab& S_fine, MultiFab& S_crse,
                             int scomp, int ncomp, const IntVect& ratio,
@@ -476,7 +414,9 @@ namespace amrex
             {
                 amrex_avgdown(i,j,k,n,crsema[box_no],finema[box_no],0,scomp,ratio);
             });
-            Gpu::streamSynchronize();
+            if (!Gpu::inNoSyncRegion()) {
+                Gpu::streamSynchronize();
+            }
         } else
 #endif
         {
@@ -499,237 +439,6 @@ namespace amrex
 
         S_crse.ParallelCopy(crse_S_fine, 0, scomp, ncomp, nGrow, 0,
                             cgeom.periodicity(), FabArrayBase::ADD);
-    }
-
-    void average_down (const MultiFab& S_fine, MultiFab& S_crse,
-                       int scomp, int ncomp, const IntVect& ratio)
-    {
-        BL_PROFILE("amrex::average_down");
-        AMREX_ASSERT(S_crse.nComp() == S_fine.nComp());
-        AMREX_ASSERT((S_crse.is_cell_centered() && S_fine.is_cell_centered()) ||
-                     (S_crse.is_nodal()         && S_fine.is_nodal()));
-
-        bool is_cell_centered = S_crse.is_cell_centered();
-
-        //
-        // Coarsen() the fine stuff on processors owning the fine data.
-        //
-        BoxArray crse_S_fine_BA = S_fine.boxArray(); crse_S_fine_BA.coarsen(ratio);
-
-        if (crse_S_fine_BA == S_crse.boxArray() && S_fine.DistributionMap() == S_crse.DistributionMap())
-        {
-#ifdef AMREX_USE_GPU
-            if (Gpu::inLaunchRegion() && S_crse.isFusingCandidate()) {
-                auto const& crsema = S_crse.arrays();
-                auto const& finema = S_fine.const_arrays();
-                if (is_cell_centered) {
-                    ParallelFor(S_crse, IntVect(0), ncomp,
-                    [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
-                    {
-                        amrex_avgdown(i,j,k,n,crsema[box_no],finema[box_no],scomp,scomp,ratio);
-                    });
-                } else {
-                    ParallelFor(S_crse, IntVect(0), ncomp,
-                    [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
-                    {
-                        amrex_avgdown_nodes(i,j,k,n,crsema[box_no],finema[box_no],scomp,scomp,ratio);
-                    });
-                }
-                Gpu::streamSynchronize();
-            } else
-#endif
-            {
-#ifdef AMREX_USE_OMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-                for (MFIter mfi(S_crse,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-                {
-                    //  NOTE: The tilebox is defined at the coarse level.
-                    const Box& bx = mfi.tilebox();
-                    Array4<Real> const& crsearr = S_crse.array(mfi);
-                    Array4<Real const> const& finearr = S_fine.const_array(mfi);
-
-                    if (is_cell_centered) {
-                        AMREX_HOST_DEVICE_PARALLEL_FOR_4D(bx, ncomp, i, j, k, n,
-                        {
-                            amrex_avgdown(i,j,k,n,crsearr,finearr,scomp,scomp,ratio);
-                        });
-                    } else {
-                        AMREX_HOST_DEVICE_PARALLEL_FOR_4D(bx, ncomp, i, j, k, n,
-                        {
-                            amrex_avgdown_nodes(i,j,k,n,crsearr,finearr,scomp,scomp,ratio);
-                        });
-                    }
-                }
-            }
-        }
-        else
-        {
-            MultiFab crse_S_fine(crse_S_fine_BA, S_fine.DistributionMap(), ncomp, 0, MFInfo(), FArrayBoxFactory());
-
-#ifdef AMREX_USE_GPU
-            if (Gpu::inLaunchRegion() && crse_S_fine.isFusingCandidate()) {
-                auto const& crsema = crse_S_fine.arrays();
-                auto const& finema = S_fine.const_arrays();
-                if (is_cell_centered) {
-                    ParallelFor(crse_S_fine, IntVect(0), ncomp,
-                    [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
-                    {
-                        amrex_avgdown(i,j,k,n,crsema[box_no],finema[box_no],0,scomp,ratio);
-                    });
-                } else {
-                    ParallelFor(crse_S_fine, IntVect(0), ncomp,
-                    [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
-                    {
-                        amrex_avgdown_nodes(i,j,k,n,crsema[box_no],finema[box_no],0,scomp,ratio);
-                    });
-                }
-                Gpu::streamSynchronize();
-            } else
-#endif
-            {
-#ifdef AMREX_USE_OMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-                for (MFIter mfi(crse_S_fine,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-                {
-                    //  NOTE: The tilebox is defined at the coarse level.
-                    const Box& bx = mfi.tilebox();
-                    Array4<Real> const& crsearr = crse_S_fine.array(mfi);
-                    Array4<Real const> const& finearr = S_fine.const_array(mfi);
-
-                    //  NOTE: We copy from component scomp of the fine fab into component 0 of the crse fab
-                    //        because the crse fab is a temporary which was made starting at comp 0, it is
-                    //        not part of the actual crse multifab which came in.
-
-                    if (is_cell_centered) {
-                        AMREX_HOST_DEVICE_PARALLEL_FOR_4D(bx, ncomp, i, j, k, n,
-                        {
-                            amrex_avgdown(i,j,k,n,crsearr,finearr,0,scomp,ratio);
-                        });
-                    } else {
-                        AMREX_HOST_DEVICE_PARALLEL_FOR_4D(bx, ncomp, i, j, k, n,
-                        {
-                            amrex_avgdown_nodes(i,j,k,n,crsearr,finearr,0,scomp,ratio);
-                        });
-                    }
-                }
-            }
-
-            S_crse.ParallelCopy(crse_S_fine,0,scomp,ncomp);
-        }
-   }
-
-// *************************************************************************************************************
-
-    void average_down_faces (const Vector<const MultiFab*>& fine,
-                             const Vector<MultiFab*>& crse,
-                             const IntVect& ratio, int ngcrse)
-    {
-        average_down_faces(Array<const MultiFab*,AMREX_SPACEDIM>
-                                   {{AMREX_D_DECL(fine[0],fine[1],fine[2])}},
-                           Array<MultiFab*,AMREX_SPACEDIM>
-                                   {{AMREX_D_DECL(crse[0],crse[1],crse[2])}},
-                           ratio, ngcrse);
-    }
-
-    void average_down_faces (const Vector<const MultiFab*>& fine,
-                             const Vector<MultiFab*>& crse, int ratio, int ngcrse)
-    {
-        average_down_faces(fine,crse,IntVect{ratio},ngcrse);
-    }
-
-    void average_down_faces (const Array<const MultiFab*,AMREX_SPACEDIM>& fine,
-                             const Array<MultiFab*,AMREX_SPACEDIM>& crse,
-                             int ratio, int ngcrse)
-    {
-        average_down_faces(fine,crse,IntVect{ratio},ngcrse);
-    }
-
-    // Average fine face-based MultiFab onto crse face-based MultiFab.
-    void average_down_faces (const Array<const MultiFab*,AMREX_SPACEDIM>& fine,
-                             const Array<MultiFab*,AMREX_SPACEDIM>& crse,
-                             const IntVect& ratio, int ngcrse)
-    {
-        for (int idim = 0; idim < AMREX_SPACEDIM; ++idim)
-        {
-            average_down_faces(*fine[idim], *crse[idim], ratio, ngcrse);
-        }
-    }
-
-    void average_down_faces (const MultiFab& fine, MultiFab& crse,
-                             const IntVect& ratio, int ngcrse)
-    {
-        AMREX_ASSERT(crse.nComp() == fine.nComp());
-        AMREX_ASSERT(fine.ixType() == crse.ixType());
-        const auto type = fine.ixType();
-        int dir;
-        for (dir = 0; dir < AMREX_SPACEDIM; ++dir) {
-            if (type.nodeCentered(dir)) break;
-        }
-        auto tmptype = type;
-        tmptype.unset(dir);
-        if (dir >= AMREX_SPACEDIM || !tmptype.cellCentered()) {
-            amrex::Abort("average_down_faces: not face index type");
-        }
-        const int ncomp = crse.nComp();
-        if (isMFIterSafe(fine, crse))
-        {
-#ifdef AMREX_USE_GPU
-            if (Gpu::inLaunchRegion() && crse.isFusingCandidate()) {
-                auto const& crsema = crse.arrays();
-                auto const& finema = fine.const_arrays();
-                ParallelFor(crse, IntVect(ngcrse), ncomp,
-                [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
-                {
-                    amrex_avgdown_faces(i,j,k,n, crsema[box_no], finema[box_no], 0, 0, ratio, dir);
-                });
-                Gpu::streamSynchronize();
-            } else
-#endif
-            {
-#ifdef AMREX_USE_OMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-                for (MFIter mfi(crse,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-                {
-                    const Box& bx = mfi.growntilebox(ngcrse);
-                    Array4<Real> const& crsearr = crse.array(mfi);
-                    Array4<Real const> const& finearr = fine.const_array(mfi);
-
-                    AMREX_HOST_DEVICE_PARALLEL_FOR_4D(bx, ncomp, i, j, k, n,
-                    {
-                        amrex_avgdown_faces(i,j,k,n, crsearr, finearr, 0, 0, ratio, dir);
-                    });
-                }
-            }
-        }
-        else
-        {
-            MultiFab ctmp(amrex::coarsen(fine.boxArray(),ratio), fine.DistributionMap(),
-                          ncomp, ngcrse, MFInfo(), FArrayBoxFactory());
-            average_down_faces(fine, ctmp, ratio, ngcrse);
-            crse.ParallelCopy(ctmp,0,0,ncomp,ngcrse,ngcrse);
-        }
-    }
-
-    void average_down_faces (const Array<const MultiFab*,AMREX_SPACEDIM>& fine,
-                             const Array<MultiFab*,AMREX_SPACEDIM>& crse,
-                             const IntVect& ratio, const Geometry& crse_geom)
-    {
-        for (int idim = 0; idim < AMREX_SPACEDIM; ++idim)
-        {
-            average_down_faces(*fine[idim], *crse[idim], ratio, crse_geom);
-        }
-    }
-
-    void average_down_faces (const MultiFab& fine, MultiFab& crse,
-                             const IntVect& ratio, const Geometry& crse_geom)
-    {
-        MultiFab ctmp(amrex::coarsen(fine.boxArray(),ratio), fine.DistributionMap(),
-                      crse.nComp(), 0);
-        average_down_faces(fine, ctmp, ratio, 0);
-        crse.ParallelCopy(ctmp,0,0,crse.nComp(),0,0,crse_geom.periodicity());
     }
 
     //! Average fine edge-based MultiFab onto crse edge-based MultiFab.
@@ -780,6 +489,9 @@ namespace amrex
                 {
                     amrex_avgdown_edges(i,j,k,n, crsema[box_no], finema[box_no], 0, 0, ratio, dir);
                 });
+                if (!Gpu::inNoSyncRegion()) {
+                    Gpu::streamSynchronize();
+                }
             } else
 #endif
             {
@@ -1117,7 +829,7 @@ namespace amrex
                 }
                 int n2dblocks = (n2d+AMREX_GPU_MAX_THREADS-1)/AMREX_GPU_MAX_THREADS;
                 int nblocks = n2dblocks * b.length(direction);
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
                 std::size_t shared_mem_byte = sizeof(Real)*Gpu::Device::warp_size;
                 amrex::launch(nblocks, AMREX_GPU_MAX_THREADS, shared_mem_byte, Gpu::gpuStream(),
                               [=] AMREX_GPU_DEVICE (Gpu::Handler const& h) noexcept
@@ -1126,7 +838,7 @@ namespace amrex
                               [=] AMREX_GPU_DEVICE () noexcept
 #endif
                 {
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
                     int i1d = h.blockIdx() / n2dblocks;
                     int i2d = h.threadIdx() + h.blockDim()*(h.blockIdx()-i1d*n2dblocks);
 #else
@@ -1154,7 +866,7 @@ namespace amrex
                     }
                     for (int n = 0; n < ncomp; ++n) {
                         Real r = (i2d < n2d) ? fab(i,j,k,n+icomp) : Real(0.0);
-#ifdef AMREX_USE_DPCPP
+#ifdef AMREX_USE_SYCL
                         Gpu::deviceReduceSum_full(p+n+ncomp*idir, r, h);
 #else
                         Gpu::deviceReduceSum_full(p+n+ncomp*idir, r);
@@ -1222,7 +934,8 @@ namespace amrex
         }
 
         if (!local) {
-            ParallelAllReduce::Sum(hv.data(), hv.size(), ParallelContext::CommunicatorSub());
+            ParallelAllReduce::Sum(hv.data(), static_cast<int>(hv.size()),
+                                   ParallelContext::CommunicatorSub());
         }
         return hv;
     }
@@ -1239,7 +952,7 @@ namespace amrex
         bool has_eb = !(mf[0]->isAllRegular());
 #endif
 
-        int nlevels = mf.size();
+        int nlevels = static_cast<int>(mf.size());
         for (int ilev = 0; ilev < nlevels-1; ++ilev) {
             iMultiFab mask = makeFineMask(*mf[ilev], *mf[ilev+1], IntVect(0),
                                           ratio[ilev],Periodicity::NonPeriodic(),

@@ -66,8 +66,8 @@ public:
     void operator= (AsyncArray const&) = delete;
     void operator= (AsyncArray &&) = delete;
 
-    T const* data () const noexcept { return (d_data != nullptr) ? d_data : h_data; }
-    T* data () noexcept { return (d_data != nullptr) ? d_data : h_data; }
+    [[nodiscard]] T const* data () const noexcept { return (d_data != nullptr) ? d_data : h_data; }
+    [[nodiscard]] T* data () noexcept { return (d_data != nullptr) ? d_data : h_data; }
     void clear ()
     {
 #ifdef AMREX_USE_GPU
@@ -85,7 +85,7 @@ public:
                 AMREX_CUDA_SAFE_CALL(cudaLaunchHostFunc(Gpu::gpuStream(),
                                                         amrex_asyncarray_delete, p));
 #endif
-#elif defined(AMREX_USE_DPCPP)
+#elif defined(AMREX_USE_SYCL)
 #ifdef AMREX_USE_CODEPLAY_HOST_TASK
                 auto pd = d_data;
                 auto ph = h_data;
@@ -101,7 +101,7 @@ public:
                     amrex::Abort(std::string("host_task: ")+ex.what()+"!!!!!");
                 }
 #else
-                // xxxxx DPCPP todo
+                // xxxxx SYCL todo
                 Gpu::streamSynchronize();
                 The_Arena()->free(d_data);
                 The_Pinned_Arena()->free(h_data);
@@ -128,6 +128,7 @@ public:
         }
         else
 #endif
+        if (h_data)
         {
             std::memcpy(h_p, h_data, n*sizeof(T));
         }
