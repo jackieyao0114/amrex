@@ -1259,9 +1259,9 @@ MLEBABecLap::getEBFluxes (const Vector<MultiFab*>& a_flux, const Vector<MultiFab
                                  Array4<Real const> const& apyfab = area[1]->const_array(mfi);,
                                  Array4<Real const> const& apzfab = area[2]->const_array(mfi););
                     Array4<Real const> const& bcfab = bcent->const_array(mfi);
-                    Array4<Real const> const& bebfab = (is_eb_dirichlet)
-                        ? m_eb_b_coeffs[amrlev][mglev]->const_array(mfi) : foo;
-                    Array4<Real const> const& phiebfab = (is_eb_dirichlet && m_is_eb_inhomog)
+                    // is_eb_dirichlet is true
+                    Array4<Real const> const& bebfab = m_eb_b_coeffs[amrlev][mglev]->const_array(mfi);
+                    Array4<Real const> const& phiebfab = (m_is_eb_inhomog)
                         ? m_eb_phi[amrlev]->const_array(mfi) : foo;
 
                     AMREX_HOST_DEVICE_FOR_4D ( bx, ncomp, i, j, k, n,
@@ -1282,7 +1282,7 @@ std::unique_ptr<Hypre>
 MLEBABecLap::makeHypre (Hypre::Interface hypre_interface) const
 {
     auto hypre_solver = MLCellABecLap::makeHypre(hypre_interface);
-    auto ijmatrix_solver = dynamic_cast<HypreABecLap3*>(hypre_solver.get());
+    auto* ijmatrix_solver = dynamic_cast<HypreABecLap3*>(hypre_solver.get());
     ijmatrix_solver->setEBDirichlet(m_eb_b_coeffs[0].back().get());
     return hypre_solver;
 }

@@ -89,6 +89,12 @@ struct StructOfArrays {
     }
 
     /**
+    * \brief Returns whether the SoA is empty (i.e. has size() == 0)
+    *
+    */
+    [[nodiscard]] bool empty () const { return this->size() == 0; }
+
+    /**
     * \brief Returns the number of real particles (excluding neighbors)
     *
     */
@@ -119,7 +125,7 @@ struct StructOfArrays {
         resize(nrp + num_neighbors);
     }
 
-    [[nodiscard]] int getNumNeighbors () { return m_num_neighbor_particles; }
+    [[nodiscard]] int getNumNeighbors () const { return m_num_neighbor_particles; }
 
     void resize (size_t count)
     {

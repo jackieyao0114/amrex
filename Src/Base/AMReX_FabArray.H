@@ -144,7 +144,7 @@ struct MFInfo {
 struct TheFaArenaDeleter {
     using pointer = char*;
     void operator()(pointer p) const noexcept {
-        The_FA_Arena()->free(p);
+        The_Comms_Arena()->free(p);
     }
 };
 using TheFaArenaPointer = std::unique_ptr<char, TheFaArenaDeleter>;
@@ -1653,8 +1653,13 @@ FabArray<FAB>::build_arrays () const
         m_hp_arrays = (void*)std::malloc(n*2*sizeof(A));
 #endif
         for (int li = 0; li < n; ++li) {
-            new ((A*)m_hp_arrays+li) A(m_fabs_v[li]->array());
-            new ((AC*)m_hp_arrays+li+n) AC(m_fabs_v[li]->const_array());
+            if (m_fabs_v[li]) {
+                new ((A*)m_hp_arrays+li) A(m_fabs_v[li]->array());
+                new ((AC*)m_hp_arrays+li+n) AC(m_fabs_v[li]->const_array());
+            } else {
+                new ((A*)m_hp_arrays+li) A{};
+                new ((AC*)m_hp_arrays+li+n) AC{};
+            }
         }
         m_arrays.hp = (A*)m_hp_arrays;
         m_const_arrays.hp = (AC*)m_hp_arrays + n;
@@ -3399,6 +3404,7 @@ FabArray<FAB>::setVal (value_type val, const CommMetaData& thecmd, int scomp, in
     else
 #endif
     {
+        AMREX_ASSERT(thecmd.m_LocTags && thecmd.m_RcvTags);
         const CopyComTagsContainer&      LocTags = *(thecmd.m_LocTags);
         const MapOfCopyComTagContainers& RcvTags = *(thecmd.m_RcvTags);
         auto N_locs = static_cast<int>(LocTags.size());
