@@ -26,7 +26,11 @@ MLNodeLaplacian::averageDownCoeffs ()
         {
             for (int mglev = 0; mglev < m_num_mg_levels[amrlev]; ++mglev)
             {
+#if (AMREX_SPACEDIM == 1)
+                int ndims = 1;
+#else
                 int ndims = (m_use_harmonic_average || m_use_mapped) ? AMREX_SPACEDIM : 1;
+#endif
                 for (int idim = 0; idim < ndims; ++idim)
                 {
                     if (m_sigma[amrlev][mglev][idim] == nullptr) {
@@ -101,7 +105,11 @@ MLNodeLaplacian::averageDownCoeffsSameAmrLevel (int amrlev)
 
     if (m_coarsening_strategy != CoarseningStrategy::Sigma) return;
 
+#if (AMREX_SPACEDIM == 1)
+    const int nsigma = 1;
+#else
     const int nsigma = (m_use_harmonic_average || m_use_mapped) ? AMREX_SPACEDIM : 1;
+#endif
 
     for (int mglev = 1; mglev < m_num_mg_levels[amrlev]; ++mglev)
     {
@@ -140,21 +148,23 @@ MLNodeLaplacian::averageDownCoeffsSameAmrLevel (int amrlev)
                         {
                             mlndlap_avgdown_coeff_x(i,j,k,cfab,ffab);
                         });
-                    } else if (idim == 1) {
+                    }
 #if (AMREX_SPACEDIM >= 2)
+                    else if (idim == 1) {
                         AMREX_HOST_DEVICE_PARALLEL_FOR_3D ( bx, i, j, k,
                         {
                             mlndlap_avgdown_coeff_y(i,j,k,cfab,ffab);
                         });
-#endif
-                    } else {
+                    }
 #if (AMREX_SPACEDIM == 3)
+                    else {
                         AMREX_HOST_DEVICE_PARALLEL_FOR_3D ( bx, i, j, k,
                         {
                             mlndlap_avgdown_coeff_z(i,j,k,cfab,ffab);
                         });
-#endif
                     }
+#endif
+#endif
                 }
             } else {
 #ifdef AMREX_USE_OMP
@@ -630,7 +640,7 @@ MLNodeLaplacian::updateVelocity (const Vector<MultiFab*>& vel, const Vector<Mult
         const auto& sigma = m_sigma[amrlev][0][0];
         const auto dxinv = m_geom[amrlev][0].InvCellSizeArray();
 #ifdef AMREX_USE_EB
-        auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+        const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
         const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
         const MultiFab* vfrac = (factory) ? &(factory->getVolFrac()) : nullptr;
         const MultiFab* intg = m_integral[amrlev].get();
@@ -715,7 +725,7 @@ MLNodeLaplacian::compGrad (int amrlev, MultiFab& grad, MultiFab& sol) const
 
     const auto dxinv = m_geom[amrlev][0].InvCellSizeArray();
 #ifdef AMREX_USE_EB
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
     const MultiFab* vfrac = (factory) ? &(factory->getVolFrac()) : nullptr;
     const MultiFab* intg = m_integral[amrlev].get();
@@ -792,7 +802,7 @@ MLNodeLaplacian::getFluxes (const Vector<MultiFab*> & a_flux, const Vector<Multi
         const auto& sigma = m_sigma[amrlev][0][0];
         const auto dxinv = m_geom[amrlev][0].InvCellSizeArray();
 #ifdef AMREX_USE_EB
-        auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+        const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
         const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
         const MultiFab* vfrac = (factory) ? &(factory->getVolFrac()) : nullptr;
         const MultiFab* intg = m_integral[amrlev].get();
@@ -875,7 +885,7 @@ MLNodeLaplacian::compDivergence (const Vector<MultiFab*>& rhs, const Vector<Mult
 }
 
 void
-MLNodeLaplacian::compRHS (const Vector<MultiFab*>& rhs, const Vector<MultiFab*>& vel,
+MLNodeLaplacian::compRHS (const Vector<MultiFab*>& rhs, const Vector<MultiFab*>& vel,  // NOLINT(readability-convert-member-functions-to-static)
                           const Vector<const MultiFab*>& rhnd,
                           const Vector<MultiFab*>& a_rhcc)
 {
@@ -980,7 +990,7 @@ MLNodeLaplacian::compRHS (const Vector<MultiFab*>& rhs, const Vector<MultiFab*>&
         const iMultiFab& dmsk = *m_dirichlet_mask[ilev][0];
 
 #ifdef AMREX_USE_EB
-        auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[ilev][0].get());
+        const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[ilev][0].get());
         const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
         const MultiFab* vfrac = (factory) ? &(factory->getVolFrac()) : nullptr;
         const MultiCutFab* barea = (factory) ? &(factory->getBndryArea()) : nullptr;

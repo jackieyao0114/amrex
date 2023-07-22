@@ -10,7 +10,7 @@
 #  include <cub/cub.cuh>
 #elif defined(AMREX_USE_HIP)
 #  include <rocprim/rocprim.hpp>
-#elif defined(AMREX_USE_DPCPP) && defined(AMREX_USE_ONEDPL)
+#elif defined(AMREX_USE_SYCL) && defined(AMREX_USE_ONEDPL)
 #  include <oneapi/dpl/execution>
 #  include <oneapi/dpl/numeric>
 #endif
@@ -70,7 +70,7 @@ struct BlockStatus<T, true>
         Data<T> tmp;
         tmp.s = {a_status, a_value};
         static_assert(sizeof(unsigned long long) == sizeof(uint64_t),
-                      "HIP/DPCPP: unsigned long long must be 64 bits");
+                      "HIP/SYCL: unsigned long long must be 64 bits");
         Gpu::Atomic::Exch(reinterpret_cast<unsigned long long*>(&d),
                           reinterpret_cast<unsigned long long&>(tmp));
 #endif
@@ -87,7 +87,7 @@ struct BlockStatus<T, true>
                 reinterpret_cast<STVA<T> volatile&>(tmp).value };
 #else
         static_assert(sizeof(unsigned long long) == sizeof(uint64_t),
-                      "HIP/DPCPP: unsigned long long must be 64 bits");
+                      "HIP/SYCL: unsigned long long must be 64 bits");
         unsigned long long tmp = Gpu::Atomic::Add
             (reinterpret_cast<unsigned long long*>(const_cast<Data<T>*>(&d)), 0ull);
         return (*reinterpret_cast<Data<T>*>(&tmp)).s;
@@ -101,7 +101,7 @@ struct BlockStatus<T, true>
     STVA<T> wait () volatile {
         STVA<T> r;
         do {
-#if defined(AMREX_USE_DPCPP)
+#if defined(AMREX_USE_SYCL)
             sycl::atomic_fence(sycl::memory_order::acq_rel, sycl::memory_scope::work_group);
 #else
             __threadfence_block();
@@ -126,7 +126,7 @@ struct BlockStatus<T, false>
         } else {
             inclusive = a_value;
         }
-#if defined(AMREX_USE_DPCPP)
+#if defined(AMREX_USE_SYCL)
         sycl::atomic_fence(sycl::memory_order::acq_rel, sycl::memory_scope::device);
 #else
         __threadfence();
@@ -139,12 +139,27 @@ struct BlockStatus<T, false>
 
     AMREX_GPU_DEVICE AMREX_FORCE_INLINE
     STVA<T> read () volatile {
+#if defined(AMREX_USE_SYCL)
+        constexpr auto mo = sycl::memory_order::relaxed;
+        constexpr auto ms = sycl::memory_scope::device;
+        constexpr auto as = sycl::access::address_space::global_space;
+#endif
         if (status == 'x') {
             return {'x', 0};
         } else if (status == 'a') {
+#if defined(AMREX_USE_SYCL)
+            sycl::atomic_ref<T,mo,ms,as> ar{const_cast<T&>(aggregate)};
+            return {'a', ar.load()};
+#else
             return {'a', aggregate};
+#endif
         } else {
+#if defined(AMREX_USE_SYCL)
+            sycl::atomic_ref<T,mo,ms,as> ar{const_cast<T&>(inclusive)};
+            return {'p', ar.load()};
+#else
             return {'p', inclusive};
+#endif
         }
     }
 
@@ -156,7 +171,7 @@ struct BlockStatus<T, false>
         STVA<T> r;
         do {
             r = read();
-#if defined(AMREX_USE_DPCPP)
+#if defined(AMREX_USE_SYCL)
             sycl::atomic_fence(sycl::memory_order::acq_rel, sycl::memory_scope::device);
 #else
             __threadfence();
@@ -168,9 +183,9 @@ struct BlockStatus<T, false>
 
 }
 
-#if defined(AMREX_USE_DPCPP)
+#if defined(AMREX_USE_SYCL)
 
-#ifndef AMREX_DPCPP_NO_MULTIPASS_SCAN
+#ifndef AMREX_SYCL_NO_MULTIPASS_SCAN
 template <typename T, typename N, typename FIN, typename FOUT, typename TYPE>
 T PrefixSum_mp (N n, FIN && fin, FOUT && fout, TYPE, RetSum a_ret_sum)
 {
@@ -197,7 +212,7 @@ T PrefixSum_mp (N n, FIN && fin, FOUT && fout, TYPE, RetSum a_ret_sum)
     amrex::launch(nblocks, nthreads, sm, stream,
     [=] AMREX_GPU_DEVICE (Gpu::Handler const& gh) noexcept
     {
-        amrex::oneapi::sub_group const& sg = gh.item->get_sub_group();
+        sycl::sub_group const& sg = gh.item->get_sub_group();
         int lane = sg.get_local_id()[0];
         int warp = sg.get_group_id()[0];
         int nwarps = sg.get_group_range()[0];
@@ -226,7 +241,7 @@ T PrefixSum_mp (N n, FIN && fin, FOUT && fout, TYPE, RetSum a_ret_sum)
             T x = x0;
             // Scan within a warp
             for (int i = 1; i <= Gpu::Device::warp_size; i *= 2) {
-                T s = sg.shuffle_up(x, i);
+                T s = sycl::shift_group_right(sg, x, i);
                 if (lane >= i) x += s;
             }
 
@@ -244,7 +259,7 @@ T PrefixSum_mp (N n, FIN && fin, FOUT && fout, TYPE, RetSum a_ret_sum)
             if (warp == 0) {
                 T y = (lane < nwarps) ? shared[lane] : 0;
                 for (int i = 1; i <= Gpu::Device::warp_size; i *= 2) {
-                    T s = sg.shuffle_up(y, i);
+                    T s = sycl::shift_group_right(sg, y, i);
                     if (lane >= i) y += s;
                 }
 
@@ -277,7 +292,7 @@ T PrefixSum_mp (N n, FIN && fin, FOUT && fout, TYPE, RetSum a_ret_sum)
     amrex::launch(1, nthreads, sm, stream,
     [=] AMREX_GPU_DEVICE (Gpu::Handler const& gh) noexcept
     {
-        amrex::oneapi::sub_group const& sg = gh.item->get_sub_group();
+        sycl::sub_group const& sg = gh.item->get_sub_group();
         int lane = sg.get_local_id()[0];
         int warp = sg.get_group_id()[0];
         int nwarps = sg.get_group_range()[0];
@@ -293,7 +308,7 @@ T PrefixSum_mp (N n, FIN && fin, FOUT && fout, TYPE, RetSum a_ret_sum)
             T x = (offset < nblocks) ? blocksum_p[offset] : 0;
             // Scan within a warp
             for (int i = 1; i <= Gpu::Device::warp_size; i *= 2) {
-                T s = sg.shuffle_up(x, i);
+                T s = sycl::shift_group_right(sg, x, i);
                 if (lane >= i) x += s;
             }
 
@@ -311,7 +326,7 @@ T PrefixSum_mp (N n, FIN && fin, FOUT && fout, TYPE, RetSum a_ret_sum)
             if (warp == 0) {
                 T y = (lane < nwarps) ? shared[lane] : 0;
                 for (int i = 1; i <= Gpu::Device::warp_size; i *= 2) {
-                    T s = sg.shuffle_up(y, i);
+                    T s = sycl::shift_group_right(sg, y, i);
                     if (lane >= i) y += s;
                 }
 
@@ -383,7 +398,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
     AMREX_ALWAYS_ASSERT(static_cast<Long>(n) < static_cast<Long>(std::numeric_limits<int>::max())*nelms_per_block);
     int nblocks = (static_cast<Long>(n) + nelms_per_block - 1) / nelms_per_block;
 
-#ifndef AMREX_DPCPP_NO_MULTIPASS_SCAN
+#ifndef AMREX_SYCL_NO_MULTIPASS_SCAN
     if (nblocks > 1) {
         return PrefixSum_mp<T>(n, std::forward<FIN>(fin), std::forward<FOUT>(fout), type, retSum);
     }
@@ -417,7 +432,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
     amrex::launch(nblocks, nthreads, sm, stream,
     [=] AMREX_GPU_DEVICE (Gpu::Handler const& gh) noexcept
     {
-        amrex::oneapi::sub_group const& sg = gh.item->get_sub_group();
+        sycl::sub_group const& sg = gh.item->get_sub_group();
         int lane = sg.get_local_id()[0];
         int warp = sg.get_group_id()[0];
         int nwarps = sg.get_group_range()[0];
@@ -436,8 +451,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
         if (gridDimx > 1) {
             int& virtual_block_id_shared = *((int*)(shared2+nwarps));
             if (threadIdxx == 0) {
-                unsigned int bid = Gpu::Atomic::Inc<sycl::access::address_space::global_space>
-                    (virtual_block_id_p, gridDimx);
+                unsigned int bid = Gpu::Atomic::Add(virtual_block_id_p, 1u);
                 virtual_block_id_shared = bid;
             }
             gh.item->barrier(sycl::access::fence_space::local_space);
@@ -472,7 +486,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
             T x = x0;
             // Scan within a warp
             for (int i = 1; i <= Gpu::Device::warp_size; i *= 2) {
-                T s = sg.shuffle_up(x, i);
+                T s = sycl::shift_group_right(sg, x, i);
                 if (lane >= i) x += s;
             }
 
@@ -490,7 +504,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
             if (warp == 0) {
                 T y = (lane < nwarps) ? shared[lane] : 0;
                 for (int i = 1; i <= Gpu::Device::warp_size; i *= 2) {
-                    T s = sg.shuffle_up(y, i);
+                    T s = sycl::shift_group_right(sg, y, i);
                     if (lane >= i) y += s;
                 }
 
@@ -543,7 +557,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
                     // implement our own __ballot
                     unsigned status_bf = (stva.status == 'p') ? (0x1u << lane) : 0;
                     for (int i = 1; i < Gpu::Device::warp_size; i *= 2) {
-                        status_bf |= sg.shuffle_xor(status_bf, i);
+                        status_bf |= sycl::permute_group_by_xor(sg, status_bf, i);
                     }
 
                     bool stop_lookback = status_bf & 0x1u;
@@ -563,7 +577,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
                         }
 
                         for (int i = Gpu::Device::warp_size/2; i > 0; i /= 2) {
-                            x += sg.shuffle_down(x,i);
+                            x += sycl::shift_group_left(sg, x,i);
                         }
                     }
 
@@ -595,7 +609,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
 
     T totalsum = 0;
     if (a_ret_sum) {
-        // xxxxx DPCPP todo: Should test if using pinned memory and thus
+        // xxxxx SYCL todo: Should test if using pinned memory and thus
         // avoiding memcpy is faster.
         Gpu::dtoh_memcpy_async(&totalsum, totalsum_p, sizeof(T));
     }
@@ -942,7 +956,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE, RetSum a_ret_sum = retSum)
         if (gridDim.x > 1) {
             int& virtual_block_id_shared = *((int*)(shared2+nwarps));
             if (threadIdx.x == 0) {
-                unsigned int bid = Gpu::Atomic::Inc(virtual_block_id_p, gridDim.x);
+                unsigned int bid = Gpu::Atomic::Add(virtual_block_id_p, 1u);
                 virtual_block_id_shared = bid;
             }
             __syncthreads();
@@ -1166,7 +1180,7 @@ T InclusiveSum (N n, T const* in, T * out, RetSum a_ret_sum = retSum)
     The_Arena()->free(d_temp);
     AMREX_GPU_ERROR_CHECK();
     return totalsum;
-#elif defined(AMREX_USE_DPCPP) && defined(AMREX_USE_ONEDPL)
+#elif defined(AMREX_USE_SYCL) && defined(AMREX_USE_ONEDPL)
     auto policy = oneapi::dpl::execution::make_device_policy(Gpu::Device::streamQueue());
     std::inclusive_scan(policy, in, in+n, out, std::plus<T>(), T(0));
     T totalsum = 0;
@@ -1236,7 +1250,7 @@ T ExclusiveSum (N n, T const* in, T * out, RetSum a_ret_sum = retSum)
     The_Arena()->free(d_temp);
     AMREX_GPU_ERROR_CHECK();
     return in_last+out_last;
-#elif defined(AMREX_USE_DPCPP) && defined(AMREX_USE_ONEDPL)
+#elif defined(AMREX_USE_SYCL) && defined(AMREX_USE_ONEDPL)
     T in_last = 0;
     if (a_ret_sum) {
         Gpu::dtoh_memcpy_async(&in_last, in+(n-1), sizeof(T));

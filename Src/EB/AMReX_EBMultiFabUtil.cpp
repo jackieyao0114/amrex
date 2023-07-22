@@ -26,7 +26,7 @@ EB_set_covered (MultiFab& mf, Real val)
 void
 EB_set_covered (MultiFab& mf, int icomp, int ncomp, int ngrow, Real val)
 {
-    const auto factory = dynamic_cast<EBFArrayBoxFactory const*>(&(mf.Factory()));
+    const auto *const factory = dynamic_cast<EBFArrayBoxFactory const*>(&(mf.Factory()));
     if (factory == nullptr) return;
     const auto& flags = factory->getMultiEBCellFlagFab();
 
@@ -68,7 +68,7 @@ EB_set_covered (MultiFab& mf, int icomp, int ncomp, const Vector<Real>& vals)
 void
 EB_set_covered (MultiFab& mf, int icomp, int ncomp, int ngrow, const Vector<Real>& a_vals)
 {
-    const auto factory = dynamic_cast<EBFArrayBoxFactory const*>(&(mf.Factory()));
+    const auto *const factory = dynamic_cast<EBFArrayBoxFactory const*>(&(mf.Factory()));
     if (factory == nullptr) return;
     const auto& flags = factory->getMultiEBCellFlagFab();
 
@@ -108,7 +108,7 @@ EB_set_covered (MultiFab& mf, int icomp, int ncomp, int ngrow, const Vector<Real
 void
 EB_set_covered_faces (const Array<MultiFab*,AMREX_SPACEDIM>& umac, Real val)
 {
-    const auto factory = dynamic_cast<EBFArrayBoxFactory const*>(&(umac[0]->Factory()));
+    const auto *const factory = dynamic_cast<EBFArrayBoxFactory const*>(&(umac[0]->Factory()));
     if (factory == nullptr) return;
 
     const auto& area = factory->getAreaFrac();
@@ -219,7 +219,7 @@ EB_set_covered_faces (const Array<MultiFab*,AMREX_SPACEDIM>& umac, Real val)
 void
 EB_set_covered_faces (const Array<MultiFab*,AMREX_SPACEDIM>& umac, const int scomp, const int ncomp, const Vector<Real>& a_vals )
 {
-    const auto factory = dynamic_cast<EBFArrayBoxFactory const*>(&(umac[0]->Factory()));
+    const auto *const factory = dynamic_cast<EBFArrayBoxFactory const*>(&(umac[0]->Factory()));
     if (factory == nullptr) return;
 
     const auto& area = factory->getAreaFrac();
@@ -410,8 +410,8 @@ EB_average_down (const MultiFab& S_fine, MultiFab& S_crse, int scomp, int ncomp,
         const auto& factory = dynamic_cast<EBFArrayBoxFactory const&>(S_fine.Factory());
         const auto& vfrac_fine = factory.getVolFrac();
 
-        BL_ASSERT(S_crse.nComp() == S_fine.nComp());
-        BL_ASSERT(S_crse.is_cell_centered() && S_fine.is_cell_centered());
+        AMREX_ASSERT(S_crse.nComp() == S_fine.nComp());
+        AMREX_ASSERT(S_crse.is_cell_centered() && S_fine.is_cell_centered());
 
         BoxArray crse_S_fine_BA = S_fine.boxArray(); crse_S_fine_BA.coarsen(ratio);
 

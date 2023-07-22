@@ -26,15 +26,15 @@ MLEBABecLap::MLEBABecLap (const Vector<Geometry>& a_geom,
                           const LPInfo& a_info,
                           const Vector<EBFArrayBoxFactory const*>& a_factory,
                           const int a_ncomp)
-    : m_ncomp(a_ncomp)
 {
-    define(a_geom, a_grids, a_dmap, a_info, a_factory);
+    define(a_geom, a_grids, a_dmap, a_info, a_factory, a_ncomp);
 }
 
 std::unique_ptr<FabFactory<FArrayBox> >
 MLEBABecLap::makeFactory (int amrlev, int mglev) const
 {
-    return makeEBFabFactory(m_geom[amrlev][mglev],
+    return makeEBFabFactory(static_cast<EBFArrayBoxFactory const*>(Factory(0,0))->getEBIndexSpace(),
+                            m_geom[amrlev][mglev],
                             m_grids[amrlev][mglev],
                             m_dmap[amrlev][mglev],
                             {1,1,1}, EBSupport::full);
@@ -45,18 +45,19 @@ MLEBABecLap::define (const Vector<Geometry>& a_geom,
                      const Vector<BoxArray>& a_grids,
                      const Vector<DistributionMapping>& a_dmap,
                      const LPInfo& a_info,
-                     const Vector<EBFArrayBoxFactory const*>& a_factory)
+                     const Vector<EBFArrayBoxFactory const*>& a_factory,
+                     int a_ncomp)
 {
     BL_PROFILE("MLEBABecLap::define()");
 
+    this->m_ncomp = a_ncomp;
+
     Vector<FabFactory<FArrayBox> const*> _factory;
-    for (auto x : a_factory) {
+    for (const auto *x : a_factory) {
         _factory.push_back(static_cast<FabFactory<FArrayBox> const*>(x));
     }
 
     MLCellABecLap::define(a_geom, a_grids, a_dmap, a_info, _factory);
-
-    const int ncomp = getNComp();
 
     m_a_coeffs.resize(m_num_amr_levels);
     m_b_coeffs.resize(m_num_amr_levels);
@@ -81,7 +82,7 @@ MLEBABecLap::define (const Vector<Geometry>& a_geom,
                 const int ng = 1;
                 m_b_coeffs[amrlev][mglev][idim].define(ba,
                                                        m_dmap[amrlev][mglev],
-                                                       ncomp, ng, MFInfo(), *m_factory[amrlev][mglev]);
+                                                       m_ncomp, ng, MFInfo(), *m_factory[amrlev][mglev]);
                 m_b_coeffs[amrlev][mglev][idim].setVal(0.0);
             }
 
@@ -96,8 +97,7 @@ MLEBABecLap::define (const Vector<Geometry>& a_geom,
     m_phi_loc = Location::CellCenter;
 }
 
-MLEBABecLap::~MLEBABecLap ()
-{}
+MLEBABecLap::~MLEBABecLap () = default;
 
 void
 MLEBABecLap::setPhiOnCentroid ()
@@ -207,7 +207,7 @@ MLEBABecLap::setEBDirichlet (int amrlev, const MultiFab& phi, const MultiFab& be
         }
     }
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
 
     MFItInfo mfi_info;
@@ -283,7 +283,7 @@ MLEBABecLap::setEBDirichlet (int amrlev, const MultiFab& phi, Real beta)
         }
     }
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
 
     MFItInfo mfi_info;
@@ -345,7 +345,7 @@ MLEBABecLap::setEBDirichlet (int amrlev, const MultiFab& phi, Vector<Real> const
         }
     }
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
 
     Gpu::DeviceVector<Real> dv_beta(hv_beta.size());
@@ -413,7 +413,7 @@ MLEBABecLap::setEBHomogDirichlet (int amrlev, const MultiFab& beta)
         }
     }
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
 
     MFItInfo mfi_info;
@@ -487,7 +487,7 @@ MLEBABecLap::setEBHomogDirichlet (int amrlev, Real beta)
         }
     }
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
 
     MFItInfo mfi_info;
@@ -549,7 +549,7 @@ MLEBABecLap::setEBHomogDirichlet (int amrlev, Vector<Real> const& hv_beta)
         }
     }
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][0].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
 
     Gpu::DeviceVector<Real> dv_beta(hv_beta.size());
@@ -602,7 +602,7 @@ MLEBABecLap::averageDownCoeffs ()
         auto& fine_b_coeffs = m_b_coeffs[amrlev];
 
         averageDownCoeffsSameAmrLevel(amrlev, fine_a_coeffs, fine_b_coeffs,
-                                      amrex::GetVecOfPtrs(m_eb_b_coeffs[0]));
+                                      amrex::GetVecOfPtrs(m_eb_b_coeffs[amrlev]));
         averageDownCoeffsToCoarseAmrLevel(amrlev);
     }
 
@@ -623,7 +623,7 @@ MLEBABecLap::averageDownCoeffsSameAmrLevel (int amrlev, Vector<MultiFab>& a,
                                             Vector<Array<MultiFab,AMREX_SPACEDIM> >& b,
                                             const Vector<MultiFab*>& b_eb)
 {
-    int nmglevs = a.size();
+    auto nmglevs = static_cast<int>(a.size());
     for (int mglev = 1; mglev < nmglevs; ++mglev)
     {
         IntVect ratio = (amrlev > 0) ? IntVect(mg_coarsen_ratio) : mg_coarsen_ratio_vec[mglev-1];
@@ -690,8 +690,8 @@ MLEBABecLap::prepareForSolve ()
 
     m_is_singular.clear();
     m_is_singular.resize(m_num_amr_levels, false);
-    auto itlo = std::find(m_lobc[0].begin(), m_lobc[0].end(), BCType::Dirichlet);
-    auto ithi = std::find(m_hibc[0].begin(), m_hibc[0].end(), BCType::Dirichlet);
+    auto itlo = std::find(m_lobc[0].begin(), m_lobc[0].end(), BCType::Dirichlet); // NOLINT
+    auto ithi = std::find(m_hibc[0].begin(), m_hibc[0].end(), BCType::Dirichlet); // NOLINT
     if (itlo == m_lobc[0].end() && ithi == m_hibc[0].end() && !isEBDirichlet())
     {  // No Dirichlet
         for (int alev = 0; alev < m_num_amr_levels; ++alev)
@@ -732,7 +732,7 @@ MLEBABecLap::compGrad (int amrlev, const Array<MultiFab*,AMREX_SPACEDIM>& grad,
                  const Real dzi = m_geom[amrlev][mglev].InvCellSize(2););
     const iMultiFab& ccmask = m_cc_mask[amrlev][mglev];
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
     auto area = (factory) ? factory->getAreaFrac() :
         Array<const MultiCutFab*, AMREX_SPACEDIM>{AMREX_D_DECL(nullptr, nullptr, nullptr)};
@@ -852,8 +852,11 @@ MLEBABecLap::normalize (int amrlev, int mglev, MultiFab& mf) const
     AMREX_D_TERM(Real dhx = m_b_scalar*dxinvarray[0]*dxinvarray[0];,
                  Real dhy = m_b_scalar*dxinvarray[1]*dxinvarray[1];,
                  Real dhz = m_b_scalar*dxinvarray[2]*dxinvarray[2];);
-
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
+#if (AMREX_SPACEDIM == 2)
+    const auto dxarray = m_geom[amrlev][mglev].CellSizeArray();
+    const Real dh = m_b_scalar*AMREX_D_TERM(dxinvarray[0], *dxinvarray[1], *dxinvarray[2]);
+#endif
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
     const MultiFab* vfrac = (factory) ? &(factory->getVolFrac()) : nullptr;
     auto area = (factory) ? factory->getAreaFrac()
@@ -917,6 +920,7 @@ MLEBABecLap::normalize (int amrlev, int mglev, MultiFab& mf) const
             {
                 mlebabeclap_normalize(tbx, fab, ascalar, afab,
                                       AMREX_D_DECL(dhx, dhy, dhz),
+                                      AMREX_2D_ONLY_ARGS(dh, dxarray)
                                       AMREX_D_DECL(bxfab, byfab, bzfab),
                                       ccmfab, flagfab, vfracfab,
                                       AMREX_D_DECL(apxfab,apyfab,apzfab),
@@ -941,7 +945,7 @@ MLEBABecLap::interpolation (int amrlev, int fmglev, MultiFab& fine, const MultiF
 {
     BL_PROFILE("MLEBABecLap::interpolation()");
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][fmglev].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][fmglev].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
 
     const int ncomp = getNComp();
@@ -1016,15 +1020,15 @@ MLEBABecLap::applyBC (int amrlev, int mglev, MultiFab& in, BCMode bc_mode, State
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(imaxorder <= 4, "MLEBABecLap::applyBC: maxorder too high");
 
     const Real dxi = m_geom[amrlev][mglev].InvCellSize(0);
-    const Real dyi = (AMREX_SPACEDIM >= 2) ? m_geom[amrlev][mglev].InvCellSize(1) : 1.0;
-    const Real dzi = (AMREX_SPACEDIM == 3) ? m_geom[amrlev][mglev].InvCellSize(2) : 1.0;
+    const Real dyi = (AMREX_SPACEDIM >= 2) ? m_geom[amrlev][mglev].InvCellSize(1) : Real(1.0);
+    const Real dzi = (AMREX_SPACEDIM == 3) ? m_geom[amrlev][mglev].InvCellSize(2) : Real(1.0);
 
     const auto& maskvals = m_maskvals[amrlev][mglev];
     const auto& bcondloc = *m_bcondloc[amrlev][mglev];
 
     const auto& ccmask = m_cc_mask[amrlev][mglev];
 
-    auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
+    const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
     const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
     auto area = (factory) ? factory->getAreaFrac()
         : Array<const MultiCutFab*,AMREX_SPACEDIM>{AMREX_D_DECL(nullptr,nullptr,nullptr)};
@@ -1175,8 +1179,8 @@ MLEBABecLap::update ()
 
     m_is_singular.clear();
     m_is_singular.resize(m_num_amr_levels, false);
-    auto itlo = std::find(m_lobc[0].begin(), m_lobc[0].end(), BCType::Dirichlet);
-    auto ithi = std::find(m_hibc[0].begin(), m_hibc[0].end(), BCType::Dirichlet);
+    auto itlo = std::find(m_lobc[0].begin(), m_lobc[0].end(), BCType::Dirichlet); // NOLINT
+    auto ithi = std::find(m_hibc[0].begin(), m_hibc[0].end(), BCType::Dirichlet); // NOLINT
     if (itlo == m_lobc[0].end() && ithi == m_hibc[0].end() && !isEBDirichlet())
     {  // No Dirichlet
         for (int alev = 0; alev < m_num_amr_levels; ++alev)
@@ -1218,7 +1222,7 @@ MLEBABecLap::getEBFluxes (const Vector<MultiFab*>& a_flux, const Vector<MultiFab
 
             const auto dxinvarr = m_geom[amrlev][mglev].InvCellSizeArray();
 
-            auto factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
+            const auto *factory = dynamic_cast<EBFArrayBoxFactory const*>(m_factory[amrlev][mglev].get());
             const FabArray<EBCellFlagFab>* flags = (factory) ? &(factory->getMultiEBCellFlagFab()) : nullptr;
             const MultiFab* vfrac = (factory) ? &(factory->getVolFrac()) : nullptr;
             auto area = (factory) ? factory->getAreaFrac()
@@ -1255,9 +1259,9 @@ MLEBABecLap::getEBFluxes (const Vector<MultiFab*>& a_flux, const Vector<MultiFab
                                  Array4<Real const> const& apyfab = area[1]->const_array(mfi);,
                                  Array4<Real const> const& apzfab = area[2]->const_array(mfi););
                     Array4<Real const> const& bcfab = bcent->const_array(mfi);
-                    Array4<Real const> const& bebfab = (is_eb_dirichlet)
-                        ? m_eb_b_coeffs[amrlev][mglev]->const_array(mfi) : foo;
-                    Array4<Real const> const& phiebfab = (is_eb_dirichlet && m_is_eb_inhomog)
+                    // is_eb_dirichlet is true
+                    Array4<Real const> const& bebfab = m_eb_b_coeffs[amrlev][mglev]->const_array(mfi);
+                    Array4<Real const> const& phiebfab = (m_is_eb_inhomog)
                         ? m_eb_phi[amrlev]->const_array(mfi) : foo;
 
                     AMREX_HOST_DEVICE_FOR_4D ( bx, ncomp, i, j, k, n,
@@ -1278,7 +1282,7 @@ std::unique_ptr<Hypre>
 MLEBABecLap::makeHypre (Hypre::Interface hypre_interface) const
 {
     auto hypre_solver = MLCellABecLap::makeHypre(hypre_interface);
-    auto ijmatrix_solver = dynamic_cast<HypreABecLap3*>(hypre_solver.get());
+    auto* ijmatrix_solver = dynamic_cast<HypreABecLap3*>(hypre_solver.get());
     ijmatrix_solver->setEBDirichlet(m_eb_b_coeffs[0].back().get());
     return hypre_solver;
 }

@@ -29,10 +29,10 @@ std::map<std::string, Vector<char> > *StateData::faHeaderMap;
 
 
 StateData::StateData ()
-    : desc(nullptr),
+    :
       new_time{INVALID_TIME,INVALID_TIME},
-      old_time{INVALID_TIME,INVALID_TIME},
-      arena(nullptr)
+      old_time{INVALID_TIME,INVALID_TIME}
+
 {
 }
 
@@ -61,9 +61,10 @@ StateData::StateData (StateData&& rhs) noexcept
 {
 }
 
-void
+StateData&
 StateData::operator= (StateData const& rhs)
 {
+    if (this == &rhs) { return *this; };
     m_factory.reset(rhs.m_factory->clone());
     desc = rhs.desc;
     arena = rhs.arena;
@@ -84,6 +85,7 @@ StateData::operator= (StateData const& rhs)
     } else {
         old_data.reset();
     }
+    return *this;
 }
 
 void
@@ -219,6 +221,7 @@ StateData::restartDoit (std::istream& is, const std::string& chkfile)
 
     int nsets;
     is >> nsets;
+    AMREX_ASSERT(nsets >= 0 && nsets <= 2);
 
     new_data = std::make_unique<MultiFab>(grids,dmap,desc->nComp(),desc->nExtra(),
                                           MFInfo().SetTag("StateData").SetArena(arena),
@@ -264,8 +267,8 @@ StateData::restartDoit (std::istream& is, const std::string& chkfile)
 
         // ---- check for preread header
         std::string FullHeaderPathName(FullPathName + "_H");
-        const char *faHeader = 0;
-        if(faHeaderMap != 0) {
+        const char *faHeader = nullptr;
+        if(faHeaderMap != nullptr) {
             std::map<std::string, Vector<char> >::iterator fahmIter;
             fahmIter = faHeaderMap->find(FullHeaderPathName);
             if(fahmIter != faHeaderMap->end()) {
@@ -455,7 +458,7 @@ StateData::FillBoundary (FArrayBox&     dest,
 
     for (int i = 0; i < AMREX_SPACEDIM; i++)
     {
-        xlo[i] = problo[i] + dx[i]*(dlo[i]-plo[i]);
+        xlo[i] = problo[i] + dx[i]*static_cast<Real>(dlo[i]-plo[i]);
     }
     for (int i = 0; i < num_comp; )
     {
@@ -877,6 +880,7 @@ StateDataPhysBCFunct::operator() (MultiFab& mf, int dest_comp, int num_comp, Int
 
     bool has_bndryfunc_fab = statedata->desc->hasBndryFuncFab();
     bool run_on_gpu = statedata->desc->RunOnGPU() && Gpu::inLaunchRegion();
+    amrex::ignore_unused(run_on_gpu);
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (!run_on_gpu)
@@ -887,7 +891,9 @@ StateDataPhysBCFunct::operator() (MultiFab& mf, int dest_comp, int num_comp, Int
         for (MFIter mfi(mf); mfi.isValid(); ++mfi)
         {
             FArrayBox& dest = mf[mfi];
+#ifdef AMREX_USE_GPU
             Array4<Real> const& desta = dest.array();
+#endif
             const Box& bx = dest.box();
 
             bool has_phys_bc = false;
@@ -937,6 +943,7 @@ StateDataPhysBCFunct::operator() (MultiFab& mf, int dest_comp, int num_comp, Int
 
                         if (lo_slab.ok())
                         {
+#ifdef AMREX_USE_GPU
                             if (run_on_gpu)
                             {
                                 tmp.resize(lo_slab,num_comp);
@@ -988,6 +995,7 @@ StateDataPhysBCFunct::operator() (MultiFab& mf, int dest_comp, int num_comp, Int
                                 });
                             }
                             else
+#endif
                             {
                                 tmp.resize(lo_slab,num_comp);
                                 const Box db = amrex::shift(lo_slab, dir, -geom.period(dir));
@@ -1003,6 +1011,7 @@ StateDataPhysBCFunct::operator() (MultiFab& mf, int dest_comp, int num_comp, Int
 
                         if (hi_slab.ok())
                         {
+#ifdef AMREX_USE_GPU
                             if (run_on_gpu)
                             {
                                 tmp.resize(hi_slab,num_comp);
@@ -1054,6 +1063,7 @@ StateDataPhysBCFunct::operator() (MultiFab& mf, int dest_comp, int num_comp, Int
                                 });
                             }
                             else
+#endif
                             {
                                 tmp.resize(hi_slab,num_comp);
                                 const Box db = amrex::shift(hi_slab, dir, geom.period(dir));
