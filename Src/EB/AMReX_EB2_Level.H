@@ -422,12 +422,12 @@ GShopLevel<G>::define_fine (G const& gshop, const Geometry& geom,
                 Array4<EBCellFlag> const& cfgtmp = cellflagtmp.array();
 
                 build_cells(vbx, cfg, ftx, fty, ftz, apx, apy, apz,
-                            fcx, fcy, fcz, xm2, ym2, zm2, vfr, ctr,
+                            fcx, fcy, fcz, xm2, ym2, zm2, dx, vfr, ctr,
                             bar, bct, bnm, cfgtmp, lst,
                             small_volfrac, geom, extend_domain_face, cover_multiple_cuts,
                             nsm, nmc);
 
-                // Becasue it is used in a synchronous reduction kernel in
+                // Because it is used in a synchronous reduction kernel in
                 // build_cells, we do not need to worry about M2's lifetime.
                 // But we still need to use Elixir to extend the life of
                 // cellflagtmp.
@@ -483,16 +483,16 @@ GShopLevel<G>::define_fine (G const& gshop, const Geometry& geom,
             break;
         } else {
             auto ls = m_mgf.getLevelSet();
-            // This is an alias MulitFab, therefore FillBoundary on it is fine.
+            // This is an alias MultiFab, therefore FillBoundary on it is fine.
             ls.FillBoundary(geom.periodicity());
             if (amrex::Verbose() > 0) {
                 if (nsmallcells) {
                     amrex::Print() << "AMReX EB: Iter. " << iter+1 << " fixed " << nsmallcells
-                                   << " small cells" << std::endl;
+                                   << " small cells" << '\n';
                 }
                 if (nmulticuts) {
                     amrex::Print() << "AMReX EB: Iter. " << iter+1 << " fixed " << nmulticuts
-                                   << " multicuts" << std::endl;
+                                   << " multicuts" << '\n';
                 }
             }
         }

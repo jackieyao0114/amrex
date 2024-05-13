@@ -72,7 +72,7 @@ public:
 
     /**
      * Sets alpha as a scalar field to values from a single component
-     * mutlifab.
+     * multifab.
      *
      * \param [in] amrlev The level of the multifab for the solver, with
      *                    \p amrlev = 0 always being the lowest level in the
@@ -88,12 +88,12 @@ public:
 
     /**
      * Sets alpha as a single scalar constant value across
-     * the mutlifab.
+     * the multifab.
      *
      * \param [in] amrlev The level of the multifab for the solver, with
      *                    \p amrlev = 0 always being the lowest level in the
      *                    AMR hierarchy represented in the solve.
-     * \param [in] alpha  Single scalar value to populate across mutlifab.
+     * \param [in] alpha  Single scalar value to populate across multifab.
      */
     template <typename T,
               std::enable_if_t<std::is_convertible_v<T,typename MF::value_type>,
@@ -118,12 +118,12 @@ public:
 
     /**
      * Sets beta as a single scalar constant value across
-     * the mutlifabs (one for each dimension).
+     * the multifabs (one for each dimension).
      *
      * \param [in] amrlev The level of the multifab for the solver, with
      *                    \p amrlev = 0 always being the lowest level in the
      *                    AMR hierarchy represented in the solve.
-     * \param [in] beta   Single scalar value to populate across mutlifabs.
+     * \param [in] beta   Single scalar value to populate across multifabs.
      */
     template <typename T,
               std::enable_if_t<std::is_convertible_v<T,typename MF::value_type>,
@@ -190,14 +190,17 @@ public:
                        Array<FAB*,AMREX_SPACEDIM> const& flux,
                        FAB const& sol, int face_only, int ncomp);
 
-protected:
-
-    bool m_needs_update = true;
-
     RT m_a_scalar = std::numeric_limits<RT>::quiet_NaN();
     RT m_b_scalar = std::numeric_limits<RT>::quiet_NaN();
     Vector<Vector<MF> > m_a_coeffs;
     Vector<Vector<Array<MF,AMREX_SPACEDIM> > > m_b_coeffs;
+
+    bool m_scalars_set = false;
+    bool m_acoef_set = false;
+
+protected:
+
+    bool m_needs_update = true;
 
     Vector<int> m_is_singular;
 
@@ -308,7 +311,9 @@ MLABecLaplacianT<MF>::setScalars (T1 a, T2 b) noexcept
         for (int amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
             m_a_coeffs[amrlev][0].setVal(RT(0.0));
         }
+        m_acoef_set = true;
     }
+    m_scalars_set = true;
 }
 
 template <typename MF>
@@ -323,6 +328,7 @@ MLABecLaplacianT<MF>::setACoeffs (int amrlev, const AMF& alpha)
                               "MLABecLaplacian::setACoeffs: alpha is supposed to be single component.");
     m_a_coeffs[amrlev][0].LocalCopy(alpha, 0, 0, 1, IntVect(0));
     m_needs_update = true;
+    m_acoef_set = true;
 }
 
 template <typename MF>
@@ -333,6 +339,7 @@ MLABecLaplacianT<MF>::setACoeffs (int amrlev, T alpha)
 {
     m_a_coeffs[amrlev][0].setVal(RT(alpha));
     m_needs_update = true;
+    m_acoef_set = true;
 }
 
 
@@ -401,6 +408,8 @@ MLABecLaplacianT<MF>::update ()
 #if (AMREX_SPACEDIM != 3)
     applyMetricTermsCoeffs();
 #endif
+
+    applyRobinBCTermsCoeffs();
 
     averageDownCoeffs();
 
@@ -474,29 +483,37 @@ MLABecLaplacianT<MF>::applyMetricTermsCoeffs ()
 //    \tilde{alpha}_i = alpha_i + (1-B) beta_{i+1/2} / h^2
 //    \tilde{rhs}_i = rhs_i + A beta_{i+1/2} / h^2
 //
-template <typename MF>
-void
-MLABecLaplacianT<MF>::applyRobinBCTermsCoeffs ()
+namespace detail {
+template <typename LP>
+void applyRobinBCTermsCoeffs (LP& linop)
 {
-    if (!(this->hasRobinBC())) { return; }
+    using RT = typename LP::RT;
 
-    const int ncomp = this->getNComp();
+    const int ncomp = linop.getNComp();
     bool reset_alpha = false;
-    if (m_a_scalar == RT(0.0)) {
-        m_a_scalar = RT(1.0);
+    if (linop.m_a_scalar == RT(0.0)) {
+        linop.m_a_scalar = RT(1.0);
         reset_alpha = true;
     }
-    const RT bovera = m_b_scalar/m_a_scalar;
+    const RT bovera = linop.m_b_scalar/linop.m_a_scalar;
 
-    for (int amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
+    if (!reset_alpha) {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(linop.m_scalars_set && linop.m_acoef_set,
+                                         "To reuse solver With Robin BC, one must re-call setScalars (and setACoeffs if the scalar is not zero)");
+    }
+
+    linop.m_scalars_set = false;
+    linop.m_acoef_set = false;
+
+    for (int amrlev = 0; amrlev < linop.NAMRLevels(); ++amrlev) {
         const int mglev = 0;
-        const Box& domain = this->m_geom[amrlev][mglev].Domain();
-        const RT dxi = static_cast<RT>(this->m_geom[amrlev][mglev].InvCellSize(0));
-        const RT dyi = static_cast<RT>((AMREX_SPACEDIM >= 2) ? this->m_geom[amrlev][mglev].InvCellSize(1) : Real(1.0));
-        const RT dzi = static_cast<RT>((AMREX_SPACEDIM == 3) ? this->m_geom[amrlev][mglev].InvCellSize(2) : Real(1.0));
+        const Box& domain = linop.Geom(amrlev,mglev).Domain();
+        const RT dxi = static_cast<RT>(linop.Geom(amrlev,mglev).InvCellSize(0));
+        const RT dyi = static_cast<RT>((AMREX_SPACEDIM >= 2) ? linop.Geom(amrlev,mglev).InvCellSize(1) : Real(1.0));
+        const RT dzi = static_cast<RT>((AMREX_SPACEDIM == 3) ? linop.Geom(amrlev,mglev).InvCellSize(2) : Real(1.0));
 
         if (reset_alpha) {
-            m_a_coeffs[amrlev][mglev].setVal(RT(0.0));
+            linop.m_a_coeffs[amrlev][mglev].setVal(RT(0.0));
         }
 
         MFItInfo mfi_info;
@@ -505,20 +522,20 @@ MLABecLaplacianT<MF>::applyRobinBCTermsCoeffs ()
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
-        for (MFIter mfi(m_a_coeffs[amrlev][mglev], mfi_info); mfi.isValid(); ++mfi)
+        for (MFIter mfi(linop.m_a_coeffs[amrlev][mglev], mfi_info); mfi.isValid(); ++mfi)
         {
             const Box& vbx = mfi.validbox();
-            auto const& afab = m_a_coeffs[amrlev][mglev].array(mfi);
+            auto const& afab = linop.m_a_coeffs[amrlev][mglev].array(mfi);
             for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-                auto const& bfab = m_b_coeffs[amrlev][mglev][idim].const_array(mfi);
+                auto const& bfab = linop.m_b_coeffs[amrlev][mglev][idim].const_array(mfi);
                 const Box& blo = amrex::adjCellLo(vbx,idim);
                 const Box& bhi = amrex::adjCellHi(vbx,idim);
                 bool outside_domain_lo = !(domain.contains(blo));
                 bool outside_domain_hi = !(domain.contains(bhi));
                 if ((!outside_domain_lo) && (!outside_domain_hi)) { continue; }
                 for (int icomp = 0; icomp < ncomp; ++icomp) {
-                    auto const& rbc = (*(this->m_robin_bcval[amrlev]))[mfi].const_array(icomp*3);
-                    if (this->m_lobc_orig[icomp][idim] == LinOpBCType::Robin && outside_domain_lo)
+                    auto const& rbc = (*(linop.m_robin_bcval[amrlev]))[mfi].const_array(icomp*3);
+                    if (linop.m_lobc_orig[icomp][idim] == LinOpBCType::Robin && outside_domain_lo)
                     {
                         if (idim == 0) {
                             RT fac = bovera*dxi*dxi;
@@ -546,7 +563,7 @@ MLABecLaplacianT<MF>::applyRobinBCTermsCoeffs ()
                             });
                         }
                     }
-                    if (this->m_hibc_orig[icomp][idim] == LinOpBCType::Robin && outside_domain_hi)
+                    if (linop.m_hibc_orig[icomp][idim] == LinOpBCType::Robin && outside_domain_hi)
                     {
                         if (idim == 0) {
                             RT fac = bovera*dxi*dxi;
@@ -577,6 +594,16 @@ MLABecLaplacianT<MF>::applyRobinBCTermsCoeffs ()
                 }
             }
         }
+    }
+}
+} // namespace detail
+
+template <typename MF>
+void
+MLABecLaplacianT<MF>::applyRobinBCTermsCoeffs ()
+{
+    if (this->hasRobinBC()) {
+        detail::applyRobinBCTermsCoeffs(*this);
     }
 }
 
@@ -699,7 +726,7 @@ MLABecLaplacianT<MF>::update_singular_flags ()
             // For now this assumes that overset regions are treated as Dirichlet bc's
             if (this->m_domain_covered[alev] && !this->m_overset_mask[alev][0])
             {
-                if (m_a_scalar == 0.0)
+                if (m_a_scalar == Real(0.0))
                 {
                     m_is_singular[alev] = true;
                 }
@@ -709,6 +736,37 @@ MLABecLaplacianT<MF>::update_singular_flags ()
                     RT amax = m_a_coeffs[alev].back().norminf(0,1,IntVect(0));
                     m_is_singular[alev] = (std::abs(asum) <= amax * RT(1.e-12));
                 }
+            }
+        }
+    }
+
+    if (!m_is_singular[0] && this->m_needs_coarse_data_for_bc &&
+        this->m_coarse_fine_bc_type == LinOpBCType::Neumann)
+    {
+        AMREX_ASSERT(this->m_overset_mask[0][0] == nullptr);
+
+        bool lev0_a_is_zero = false;
+        if (m_a_scalar == Real(0.0)) {
+            lev0_a_is_zero = true;
+        } else {
+            RT asum = m_a_coeffs[0].back().sum(0,IntVect(0));
+            RT amax = m_a_coeffs[0].back().norminf(0,1,IntVect(0));
+            bool a_is_almost_zero = std::abs(asum) <= amax * RT(1.e-12);
+            if (a_is_almost_zero) { lev0_a_is_zero = true; }
+        }
+
+        if (lev0_a_is_zero) {
+            auto bbox = this->m_grids[0][0].minimalBox();
+            for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
+                if (this->m_lobc[0][idim] == LinOpBCType::Dirichlet) {
+                    bbox.growLo(idim,1);
+                }
+                if (this->m_hibc[0][idim] == LinOpBCType::Dirichlet) {
+                    bbox.growHi(idim,1);
+                }
+            }
+            if (this->m_geom[0][0].Domain().contains(bbox)) {
+                m_is_singular[0] = true;
             }
         }
     }
@@ -1190,8 +1248,9 @@ MLABecLaplacianT<MF>::makeNLinOp (int /*grid_size*/) const
     if (this->needsCoarseDataForBC())
     {
         const Real* dx0 = this->m_geom[0][0].CellSize();
-        const Real fac = Real(0.5)*this->m_coarse_data_crse_ratio;
-        RealVect cbloc {AMREX_D_DECL(dx0[0]*fac, dx0[1]*fac, dx0[2]*fac)};
+        RealVect fac(this->m_coarse_data_crse_ratio);
+        fac *= Real(0.5);
+        RealVect cbloc {AMREX_D_DECL(dx0[0]*fac[0], dx0[1]*fac[1], dx0[2]*fac[2])};
         nop->setCoarseFineBCLocation(cbloc);
     }
 

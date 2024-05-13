@@ -101,6 +101,10 @@ if (AMReX_TEST_TYPE STREQUAL "Small")
 
    add_subdirectory("Amr/Advection_AmrCore")
 
+   if (AMReX_OMP)
+      add_subdirectory("OpenMP/atomicAdd")
+   endif ()
+
    if (AMReX_PARTICLES)
       add_subdirectory("Particles/Redistribute")
    endif ()
@@ -141,6 +145,10 @@ else()
 
    if (AMReX_CUDA)
       list(APPEND AMREX_TESTS_SUBDIRS GPU)
+   endif ()
+
+   if (AMReX_GPU_BACKEND STREQUAL NONE)
+      list(APPEND AMREX_TESTS_SUBDIRS OpenMP)
    endif ()
 
    list(TRANSFORM AMREX_TESTS_SUBDIRS PREPEND "${CMAKE_CURRENT_LIST_DIR}/")

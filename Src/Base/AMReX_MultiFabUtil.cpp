@@ -46,11 +46,15 @@ namespace {
             boxes.push_back(is.second);
             slice_to_full_ba_map.push_back(is.first);
         }
-        BoxArray slice_ba(boxes.data(), static_cast<int>(boxes.size()));
-        DistributionMapping slice_dmap(std::move(procs));
+        if (!boxes.empty()) {
+            BoxArray slice_ba(boxes.data(), static_cast<int>(boxes.size()));
+            DistributionMapping slice_dmap(std::move(procs));
 
-        return std::make_unique<MultiFab>(slice_ba, slice_dmap, ncomp, 0,
-                                          MFInfo(), FArrayBoxFactory());
+            return std::make_unique<MultiFab>(slice_ba, slice_dmap, ncomp, 0,
+                                              MFInfo(), FArrayBoxFactory());
+        } else {
+            return nullptr;
+        }
     }
 }
 
@@ -224,7 +228,7 @@ namespace amrex
                                     const Geometry& geom, int ncomp, bool use_harmonic_averaging)
     {
         AMREX_ASSERT(cc.nComp() == ncomp);
-        AMREX_ASSERT(cc.nGrow() >= 1);
+        AMREX_ASSERT(cc.nGrowVect().allGE(1));
         AMREX_ASSERT(fc[0]->nComp() == ncomp); // We only expect fc to have the gradient perpendicular to the face
 #if (AMREX_SPACEDIM >= 2)
         AMREX_ASSERT(fc[1]->nComp() == ncomp); // We only expect fc to have the gradient perpendicular to the face
@@ -308,9 +312,6 @@ namespace amrex
 
 // *************************************************************************************************************
 
-    // Average fine cell-based MultiFab onto crse cell-centered MultiFab.
-    // We do NOT assume that the coarse layout is a coarsened version of the fine layout.
-    // This version DOES use volume-weighting.
     void average_down (const MultiFab& S_fine, MultiFab& S_crse,
                        const Geometry& fgeom, const Geometry& cgeom,
                        int scomp, int ncomp, int rr)
@@ -335,7 +336,8 @@ namespace amrex
         amrex::average_down(S_fine, S_crse, scomp, ncomp, ratio);
 #else
 
-        AMREX_ASSERT(S_crse.nComp() == S_fine.nComp());
+        AMREX_ASSERT(S_crse.nComp() == S_fine.nComp() &&
+                     S_fine.is_cell_centered() && S_crse.is_cell_centered());
 
         //
         // Coarsen() the fine stuff on processors owning the fine data.
@@ -394,10 +396,9 @@ namespace amrex
                             const Geometry& cgeom, const Geometry& /*fgeom*/)
     {
         AMREX_ASSERT(S_crse.nComp() == S_fine.nComp());
-        AMREX_ASSERT(ratio == ratio[0]);
-        AMREX_ASSERT(S_fine.nGrow() % ratio[0] == 0);
 
-        const int nGrow = S_fine.nGrow() / ratio[0];
+        const IntVect nGrow = S_fine.nGrowVect() / ratio;
+        AMREX_ASSERT((nGrow*ratio) == S_fine.nGrowVect());
 
         //
         // Coarsen() the fine stuff on processors owning the fine data.
@@ -410,7 +411,7 @@ namespace amrex
         if (Gpu::inLaunchRegion() && crse_S_fine.isFusingCandidate()) {
             auto const& crsema = crse_S_fine.arrays();
             auto const& finema = S_fine.const_arrays();
-            ParallelFor(crse_S_fine, IntVect(nGrow), ncomp,
+            ParallelFor(crse_S_fine, nGrow, ncomp,
             [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
             {
                 amrex_avgdown(i,j,k,n,crsema[box_no],finema[box_no],0,scomp,ratio);
@@ -438,7 +439,7 @@ namespace amrex
             }
         }
 
-        S_crse.ParallelCopy(crse_S_fine, 0, scomp, ncomp, nGrow, 0,
+        S_crse.ParallelCopy(crse_S_fine, 0, scomp, ncomp, nGrow, IntVect(0),
                             cgeom.periodicity(), FabArrayBase::ADD);
     }
 
@@ -476,7 +477,7 @@ namespace amrex
         auto tmptype = type;
         tmptype.set(dir);
         if (dir >= AMREX_SPACEDIM || !tmptype.nodeCentered()) {
-            amrex::Abort("average_down_edges: not face index type");
+            amrex::Abort("average_down_edges: not edge index type");
         }
         const int ncomp = crse.nComp();
         if (isMFIterSafe(fine, crse))
@@ -554,13 +555,17 @@ namespace amrex
         BL_PROFILE("amrex::get_slice_data");
 
         if (interpolate) {
-            AMREX_ASSERT(cc.nGrow() >= 1);
+            AMREX_ASSERT(cc.nGrowVect().allGE(1));
         }
 
         const auto geomdata = geom.data();
 
         Vector<int> slice_to_full_ba_map;
         std::unique_ptr<MultiFab> slice = allocateSlice(dir, cc, ncomp, geom, coord, slice_to_full_ba_map);
+
+        if (!slice) {
+            return nullptr;
+        }
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())

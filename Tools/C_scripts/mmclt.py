@@ -15,9 +15,9 @@ def mmclt(argv):
                         help="Ccache log file",
                         default="ccache.log.txt")
     parser.add_argument("--identifier",
-                        help="Unique identifier for finding compilaton line in the log file",
+                        help="Unique identifier for finding compilation line in the log file",
                         default="Src/Base")
-    # We assume Src/Base can be used as an indentifier to distinguish amrex code
+    # We assume Src/Base can be used as an identifier to distinguish amrex code
     # from cmake's temporary files like build/CMakeFiles/CMakeScratch/TryCompile-hw3x4m/test_mpi.cpp
     parser.add_argument("--output",
                         help="Make file for clang-tidy",
@@ -28,7 +28,7 @@ def mmclt(argv):
     fout = open(args.output, "w")
 
     fout.write("CLANG_TIDY ?= clang-tidy\n")
-    fout.write("override CLANG_TIDY_ARGS += --extra-arg=-Wno-unknown-warning-option --extra-arg-before=--driver-mode=g++\n")
+    fout.write("override CLANG_TIDY_ARGS += --extra-arg=-Wno-unknown-warning-option --extra-arg=-Wno-ignored-optimization-argument --extra-arg-before=--driver-mode=g++\n")
     fout.write("\n")
 
     fout.write(".SECONDEXPANSION:\n")

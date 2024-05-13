@@ -230,7 +230,7 @@ MLNodeLaplacian::getSolvabilityOffset (int amrlev, int mglev, MultiFab const& rh
                 if (m_lobc[0][idim] != LinOpBCType::Neumann &&
                     m_lobc[0][idim] != LinOpBCType::inflow)
                 {
-                    nddom.growLo(idim, 10); // so that the test in ParReduce will faill
+                    nddom.growLo(idim, 10); // so that the test in ParReduce will fail
                 }
                 if (m_hibc[0][idim] != LinOpBCType::Neumann &&
                     m_hibc[0][idim] != LinOpBCType::inflow)
@@ -334,7 +334,7 @@ MLNodeLaplacian::fixSolvabilityByOffset (int amrlev, int mglev, MultiFab& rhs,
                 if (m_lobc[0][idim] != LinOpBCType::Neumann &&
                     m_lobc[0][idim] != LinOpBCType::inflow)
                 {
-                    nddom.growLo(idim, 10); // so that the test in ParReduce will faill
+                    nddom.growLo(idim, 10); // so that the test in ParReduce will fail
                 }
                 if (m_hibc[0][idim] != LinOpBCType::Neumann &&
                     m_hibc[0][idim] != LinOpBCType::inflow)
@@ -442,7 +442,7 @@ MLNodeLaplacian::fixUpResidualMask (int amrlev, iMultiFab& resmsk)
         Array4<int const> const& fmsk = cfmask.const_array(mfi);
         AMREX_HOST_DEVICE_PARALLEL_FOR_3D ( bx, i, j, k,
         {
-            if (fmsk(i,j,k) == crse_fine_node) { rmsk(i,j,k) = 1; }
+            if (fmsk(i,j,k) == nodelap_detail::crse_fine_node) { rmsk(i,j,k) = 1; }
         });
     }
 }
@@ -750,7 +750,7 @@ MLNodeLaplacian::restrictInteriorNodes (int camrlev, MultiFab& crhs, MultiFab& a
 
     MultiFab* frhs = nullptr;
     std::unique_ptr<MultiFab> mf;
-    if (a_frhs.nGrowVect().allGE(IntVect(amrrr-1)))
+    if (a_frhs.nGrowVect().allGE(amrrr-1))
     {
         frhs = &a_frhs;
     }
@@ -829,7 +829,7 @@ MLNodeLaplacian::restrictInteriorNodes (int camrlev, MultiFab& crhs, MultiFab& a
             Array4<int const> const& mfab = c_nd_mask.const_array(mfi);
             AMREX_HOST_DEVICE_PARALLEL_FOR_3D ( bx, i, j, k,
             {
-                if (mfab(i,j,k) == fine_node) { dfab(i,j,k) = sfab(i,j,k); }
+                if (mfab(i,j,k) == nodelap_detail::fine_node) { dfab(i,j,k) = sfab(i,j,k); }
             });
         }
     }
@@ -947,7 +947,7 @@ MLNodeLaplacian::checkPoint (std::string const& file_name) const
 
             HeaderFile.precision(17);
 
-            // MLLinop stuff
+            // MLLinOp stuff
             HeaderFile << "verbose = " << verbose << "\n"
                        << "nlevs = " << NAMRLevels() << "\n"
                        << "do_agglomeration = " << info.do_agglomeration << "\n"
