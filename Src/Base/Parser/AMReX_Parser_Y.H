@@ -42,7 +42,8 @@ enum parser_f1_t {  // Built-in functions with one argument
     PARSER_FLOOR,
     PARSER_CEIL,
     PARSER_COMP_ELLINT_1,
-    PARSER_COMP_ELLINT_2
+    PARSER_COMP_ELLINT_2,
+    PARSER_ERF
 };
 
 static
@@ -73,7 +74,8 @@ std::string_view parser_f1_s[] =
     "floor",
     "ceil",
     "comp_ellint_1",
-    "comp_ellint_2"
+    "comp_ellint_2",
+    "erf"
 };
 
 enum parser_f2_t {  // Built-in functions with two arguments
@@ -347,29 +349,32 @@ AMREX_GPU_HOST_DEVICE AMREX_NO_INLINE
 T parser_math_atanh (T a) { return std::atanh(a); }
 
 template <typename T>
-AMREX_GPU_HOST_DEVICE AMREX_NO_INLINE
-T parser_math_comp_ellint_1 (T a)
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+T parser_math_comp_ellint_1 (T k)
 {
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDA_ARCH__)
-    return std::comp_ellint_1(a);
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDA_ARCH__) && !defined(__NVCOMPILER)
+    return std::comp_ellint_1(k);
 #else
-    amrex::ignore_unused(a);
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, "parser: comp_ellint_1 only supported with gcc and cpu");
-    return 0.0;
+    return amrex::Math::comp_ellint_1<T>(k);
+#endif
+}
+
+template <typename T>
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+T parser_math_comp_ellint_2 (T k)
+{
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDA_ARCH__) && !defined(__NVCOMPILER)
+    return std::comp_ellint_2(k);
+#else
+    return amrex::Math::comp_ellint_2<T>(k);
 #endif
 }
 
 template <typename T>
 AMREX_GPU_HOST_DEVICE AMREX_NO_INLINE
-T parser_math_comp_ellint_2 (T a)
+T parser_math_erf(T a)
 {
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDA_ARCH__)
-    return std::comp_ellint_2(a);
-#else
-    amrex::ignore_unused(a);
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, "parser: comp_ellint_2 only supported with gcc and cpu");
-    return 0.0;
-#endif
+    return std::erf(a);
 }
 
 template <typename T>
@@ -420,6 +425,7 @@ parser_call_f1 (enum parser_f1_t type, double a)
     case PARSER_CEIL:        return std::ceil(a);
     case PARSER_COMP_ELLINT_1: return parser_math_comp_ellint_1<double>(a);
     case PARSER_COMP_ELLINT_2: return parser_math_comp_ellint_2<double>(a);
+    case PARSER_ERF:         return parser_math_erf<double>(a);
     default:
         amrex::Abort("parser_call_f1: Unknown function ");
         return 0.0;

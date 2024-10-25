@@ -19,7 +19,9 @@ amrex_iparsererror (char const *s, ...)
 
 namespace amrex {
 
-static struct iparser_node* iparser_root = nullptr;
+namespace {
+    struct iparser_node* iparser_root = nullptr;
+}
 
 // This is called by a bison rule to store the original AST in a static variable.
 void
@@ -49,7 +51,7 @@ iparser_newnode (enum iparser_node_t type, struct iparser_node* l, struct iparse
 }
 
 struct iparser_node*
-iparser_newnumber (int d)
+iparser_newnumber (long long d)
 {
     auto *r = (struct iparser_number*) std::malloc(sizeof(struct iparser_number));
     r->type = IPARSER_NUMBER;
@@ -150,7 +152,8 @@ amrex_iparser_delete (struct amrex_iparser* iparser)
     std::free(iparser);
 }
 
-static
+namespace {
+
 std::size_t
 iparser_aligned_size (std::size_t N)
 {
@@ -160,13 +163,14 @@ iparser_aligned_size (std::size_t N)
     return x;
 }
 
-static
 void*
 iparser_allocate (struct amrex_iparser* my_iparser, std::size_t N)
 {
     void* r = my_iparser->p_free;
     my_iparser->p_free = (char*)r + iparser_aligned_size(N);
     return r;
+}
+
 }
 
 struct amrex_iparser*
@@ -394,7 +398,7 @@ iparser_ast_optimize (struct iparser_node* node)
         if (node->l->type == IPARSER_NUMBER &&
             node->r->type == IPARSER_NUMBER)
         {
-            int v = ((struct iparser_number*)(node->l))->value
+            auto v= ((struct iparser_number*)(node->l))->value
                 +   ((struct iparser_number*)(node->r))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
@@ -424,28 +428,28 @@ iparser_ast_optimize (struct iparser_node* node)
         else if (node->l->type == IPARSER_NUMBER &&
                  node->r->type == IPARSER_ADD_VP)
         {
-            int v = ((struct iparser_number*)(node->l))->value + IPARSER_EVAL_R(node);
+            auto v = ((struct iparser_number*)(node->l))->value + IPARSER_EVAL_R(node);
             IPARSER_MOVEUP_R(node, v);
             node->type = IPARSER_ADD_VP;
         }
         else if (node->l->type == IPARSER_NUMBER &&
                  node->r->type == IPARSER_SUB_VP)
         {
-            int v = ((struct iparser_number*)(node->l))->value + IPARSER_EVAL_R(node);
+            auto v = ((struct iparser_number*)(node->l))->value + IPARSER_EVAL_R(node);
             IPARSER_MOVEUP_R(node, v);
             node->type = IPARSER_SUB_VP;
         }
         else if (node->l->type == IPARSER_ADD_VP &&
                  node->r->type == IPARSER_NUMBER)
         {
-            int v = IPARSER_EVAL_L(node) + ((struct iparser_number*)(node->r))->value;
+            auto v = IPARSER_EVAL_L(node) + ((struct iparser_number*)(node->r))->value;
             IPARSER_MOVEUP_L(node, v);
             node->type = IPARSER_ADD_VP;
         }
         else if (node->l->type == IPARSER_SUB_VP &&
                  node->r->type == IPARSER_NUMBER)
         {
-            int v = IPARSER_EVAL_L(node) + ((struct iparser_number*)(node->r))->value;
+            auto v = IPARSER_EVAL_L(node) + ((struct iparser_number*)(node->r))->value;
             IPARSER_MOVEUP_L(node, v);
             node->type = IPARSER_SUB_VP;
         }
@@ -454,14 +458,14 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->r->l->type == IPARSER_NUMBER)
             { // #l + (#rl + node_rr) -> (#l + #rl) + node_rr, same type
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     +   ((struct iparser_number*)(node->r->l))->value;
                 node->r = node->r->r;
                 ((struct iparser_number*)(node->l))->value = v;
             }
             else if (node->r->r->type == IPARSER_NUMBER)
             { // #l + (node_rl + #rr) -> (#l + #rr) + node_rl, same type
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     +   ((struct iparser_number*)(node->r->r))->value;
                 node->r = node->r->l;
                 ((struct iparser_number*)(node->l))->value = v;
@@ -472,7 +476,7 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->r->l->type == IPARSER_NUMBER)
             { // #l + (#rl - node_rr) -> (#l + #rl) - node_rr, type change
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     +   ((struct iparser_number*)(node->r->l))->value;
                 node->r = node->r->r;
                 ((struct iparser_number*)(node->l))->value = v;
@@ -480,7 +484,7 @@ iparser_ast_optimize (struct iparser_node* node)
             }
             else if (node->r->r->type == IPARSER_NUMBER)
             { // #l + (node_rl - #rr) -> (#l - #rr) + node_rl, same type
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     -   ((struct iparser_number*)(node->r->r))->value;
                 node->r = node->r->l;
                 ((struct iparser_number*)(node->l))->value = v;
@@ -491,14 +495,14 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->l->l->type == IPARSER_NUMBER)
             { // (#ll + node_lr) + #r -> nodel_lr + (#ll + #r), same type
-                int v = ((struct iparser_number*)(node->l->l))->value
+                auto v= ((struct iparser_number*)(node->l->l))->value
                     +   ((struct iparser_number*)(node->r))->value;
                 node->l = node->l->r;
                 ((struct iparser_number*)(node->r))->value = v;
             }
             else if (node->l->r->type == IPARSER_NUMBER)
             { // (node_ll + #lr) + #r -> node_ll + (#lr + #r), same type
-                int v = ((struct iparser_number*)(node->l->r))->value
+                auto v= ((struct iparser_number*)(node->l->r))->value
                     +   ((struct iparser_number*)(node->r))->value;
                 node->l = node->l->l;
                 ((struct iparser_number*)(node->r))->value = v;
@@ -509,7 +513,7 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->l->l->type == IPARSER_NUMBER)
             { // (#ll - node_lr) + #r -> (#ll + #r) - node_lr, type change
-                int v = ((struct iparser_number*)(node->l->l))->value
+                auto v= ((struct iparser_number*)(node->l->l))->value
                     +   ((struct iparser_number*)(node->r))->value;
                 node->r = node->l->r;
                 ((struct iparser_number*)(node->l))->type = IPARSER_NUMBER;
@@ -518,7 +522,7 @@ iparser_ast_optimize (struct iparser_node* node)
             }
             else if (node->l->r->type == IPARSER_NUMBER)
             { // (node_ll - #lr) + #r -> node_ll + (#r - #lr), same type
-                int v = ((struct iparser_number*)(node->r))->value
+                auto v= ((struct iparser_number*)(node->r))->value
                     -   ((struct iparser_number*)(node->l->r))->value;
                 node->l = node->l->l;
                 ((struct iparser_number*)(node->r))->value = v;
@@ -532,7 +536,7 @@ iparser_ast_optimize (struct iparser_node* node)
         if (node->l->type == IPARSER_NUMBER &&
             node->r->type == IPARSER_NUMBER)
         {
-            int v = ((struct iparser_number*)(node->l))->value
+            auto v= ((struct iparser_number*)(node->l))->value
                 -   ((struct iparser_number*)(node->r))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
@@ -562,28 +566,28 @@ iparser_ast_optimize (struct iparser_node* node)
         else if (node->l->type == IPARSER_NUMBER &&
                  node->r->type == IPARSER_ADD_VP)
         {
-            int v = ((struct iparser_number*)(node->l))->value - IPARSER_EVAL_R(node);
+            auto v= ((struct iparser_number*)(node->l))->value - IPARSER_EVAL_R(node);
             IPARSER_MOVEUP_R(node, v);
             node->type = IPARSER_SUB_VP;
         }
         else if (node->l->type == IPARSER_NUMBER &&
                  node->r->type == IPARSER_SUB_VP)
         {
-            int v = ((struct iparser_number*)(node->l))->value - IPARSER_EVAL_R(node);
+            auto v= ((struct iparser_number*)(node->l))->value - IPARSER_EVAL_R(node);
             IPARSER_MOVEUP_R(node, v);
             node->type = IPARSER_ADD_VP;
         }
         else if (node->l->type == IPARSER_ADD_VP &&
                  node->r->type == IPARSER_NUMBER)
         {
-            int v = IPARSER_EVAL_L(node) - ((struct iparser_number*)(node->r))->value;
+            auto v= IPARSER_EVAL_L(node) - ((struct iparser_number*)(node->r))->value;
             IPARSER_MOVEUP_L(node, v);
             node->type = IPARSER_ADD_VP;
         }
         else if (node->l->type == IPARSER_SUB_VP &&
                  node->r->type == IPARSER_NUMBER)
         {
-            int v = IPARSER_EVAL_L(node) - ((struct iparser_number*)(node->r))->value;
+            auto v= IPARSER_EVAL_L(node) - ((struct iparser_number*)(node->r))->value;
             IPARSER_MOVEUP_L(node, v);
             node->type = IPARSER_SUB_VP;
         }
@@ -592,14 +596,14 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->r->l->type == IPARSER_NUMBER)
             { // #l - (#rl + node_rr) -> (#l - #rl) - node_rr, same type
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     -   ((struct iparser_number*)(node->r->l))->value;
                 node->r = node->r->r;
                 ((struct iparser_number*)(node->l))->value = v;
             }
             else if (node->r->r->type == IPARSER_NUMBER)
             { // #l - (node_rl + #rr) -> (#l - #rr) - node_rl, same type
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     -   ((struct iparser_number*)(node->r->r))->value;
                 node->r = node->r->l;
                 ((struct iparser_number*)(node->l))->value = v;
@@ -610,7 +614,7 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->r->l->type == IPARSER_NUMBER)
             { // #l - (#rl - node_rr) -> (#l - #rl) + node_rr, type change
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     -   ((struct iparser_number*)(node->r->l))->value;
                 node->r = node->r->r;
                 ((struct iparser_number*)(node->l))->value = v;
@@ -618,7 +622,7 @@ iparser_ast_optimize (struct iparser_node* node)
             }
             else if (node->r->r->type == IPARSER_NUMBER)
             { // #l - (node_rl - #rr) -> (#l + #rr) - node_rl, same type
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     +   ((struct iparser_number*)(node->r->r))->value;
                 node->r = node->r->l;
                 ((struct iparser_number*)(node->l))->value = v;
@@ -629,14 +633,14 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->l->l->type == IPARSER_NUMBER)
             { // (#ll + node_lr) - #r -> node_lr - (#r - #ll), same type
-                int v = ((struct iparser_number*)(node->r))->value
+                auto v= ((struct iparser_number*)(node->r))->value
                     -   ((struct iparser_number*)(node->l->l))->value;
                 node->l = node->l->r;
                 ((struct iparser_number*)(node->r))->value = v;
             }
             else if (node->l->r->type == IPARSER_NUMBER)
             { // (node_ll + #lr) - #r -> node_ll - (#r - #lr), same type
-                int v = ((struct iparser_number*)(node->r))->value
+                auto v= ((struct iparser_number*)(node->r))->value
                     -   ((struct iparser_number*)(node->l->r))->value;
                 node->l = node->l->l;
                 ((struct iparser_number*)(node->r))->value = v;
@@ -647,7 +651,7 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->l->l->type == IPARSER_NUMBER)
             { // (#ll - node_lr) - #r -> (#ll - #r) - node_lr, type change
-                int v = ((struct iparser_number*)(node->l->l))->value
+                auto v= ((struct iparser_number*)(node->l->l))->value
                     -   ((struct iparser_number*)(node->r))->value;
                 node->r = node->l->r;
                 node->l->type = IPARSER_NUMBER;
@@ -655,7 +659,7 @@ iparser_ast_optimize (struct iparser_node* node)
             }
             else if (node->l->r->type == IPARSER_NUMBER)
             { // (node_ll - #lr) - #r -> node_ll - (#r + #lr), same type
-                int v = ((struct iparser_number*)(node->r))->value
+                auto v= ((struct iparser_number*)(node->r))->value
                     +   ((struct iparser_number*)(node->l->r))->value;
                 node->l = node->l->l;
                 ((struct iparser_number*)(node->r))->value = v;
@@ -669,7 +673,7 @@ iparser_ast_optimize (struct iparser_node* node)
         if (node->l->type == IPARSER_NUMBER &&
             node->r->type == IPARSER_NUMBER)
         {
-            int v = ((struct iparser_number*)(node->l))->value
+            auto v= ((struct iparser_number*)(node->l))->value
                 *   ((struct iparser_number*)(node->r))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
@@ -699,14 +703,14 @@ iparser_ast_optimize (struct iparser_node* node)
         else if (node->l->type == IPARSER_NUMBER &&
                  node->r->type == IPARSER_MUL_VP)
         {
-            int v = ((struct iparser_number*)(node->l))->value * IPARSER_EVAL_R(node);
+            auto v= ((struct iparser_number*)(node->l))->value * IPARSER_EVAL_R(node);
             IPARSER_MOVEUP_R(node, v);
             node->type = IPARSER_MUL_VP;
         }
         else if (node->l->type == IPARSER_MUL_VP &&
                  node->r->type == IPARSER_NUMBER)
         {
-            int v = IPARSER_EVAL_L(node) * ((struct iparser_number*)(node->r))->value;
+            auto v= IPARSER_EVAL_L(node) * ((struct iparser_number*)(node->r))->value;
             IPARSER_MOVEUP_L(node, v);
             node->type = IPARSER_MUL_VP;
         }
@@ -715,14 +719,14 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->r->l->type == IPARSER_NUMBER)
             { // #l * (#rl * node_rr) -> (#l * #rl) * node_rr, same type
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     *   ((struct iparser_number*)(node->r->l))->value;
                 node->r = node->r->r;
                 ((struct iparser_number*)(node->l))->value = v;
             }
             else if (node->r->r->type == IPARSER_NUMBER)
             { // #l * (node_rl * #rr) -> (#l * #rr) * node_rl, same type
-                int v = ((struct iparser_number*)(node->l))->value
+                auto v= ((struct iparser_number*)(node->l))->value
                     *   ((struct iparser_number*)(node->r->r))->value;
                 node->r = node->r->l;
                 ((struct iparser_number*)(node->l))->value = v;
@@ -733,14 +737,14 @@ iparser_ast_optimize (struct iparser_node* node)
         {
             if (node->l->l->type == IPARSER_NUMBER)
             { // (#ll * node_lr) * #r -> nodel_lr * (#ll * #r), same type
-                int v = ((struct iparser_number*)(node->l->l))->value
+                auto v= ((struct iparser_number*)(node->l->l))->value
                     *   ((struct iparser_number*)(node->r))->value;
                 node->l = node->l->r;
                 ((struct iparser_number*)(node->r))->value = v;
             }
             else if (node->l->r->type == IPARSER_NUMBER)
             { // (node_ll * #lr) * #r -> node_ll + (#lr * #r), same type
-                int v = ((struct iparser_number*)(node->l->r))->value
+                auto v= ((struct iparser_number*)(node->l->r))->value
                     *   ((struct iparser_number*)(node->r))->value;
                 node->l = node->l->l;
                 ((struct iparser_number*)(node->r))->value = v;
@@ -754,7 +758,7 @@ iparser_ast_optimize (struct iparser_node* node)
         if (node->l->type == IPARSER_NUMBER &&
             node->r->type == IPARSER_NUMBER)
         {
-            int v = ((struct iparser_number*)(node->l))->value
+            auto v= ((struct iparser_number*)(node->l))->value
                 /   ((struct iparser_number*)(node->r))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
@@ -786,7 +790,7 @@ iparser_ast_optimize (struct iparser_node* node)
         iparser_ast_optimize(node->l);
         if (node->l->type == IPARSER_NUMBER)
         {
-            int v = -((struct iparser_number*)(node->l))->value;
+            auto v= -((struct iparser_number*)(node->l))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
         }
@@ -872,7 +876,7 @@ iparser_ast_optimize (struct iparser_node* node)
         iparser_ast_optimize(node->l);
         if (node->l->type == IPARSER_NUMBER)
         {
-            int v = iparser_call_f1
+            auto v= iparser_call_f1
                 (((struct iparser_f1*)node)->ftype,
                  ((struct iparser_number*)(((struct iparser_f1*)node)->l))->value);
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
@@ -885,7 +889,7 @@ iparser_ast_optimize (struct iparser_node* node)
         if (node->l->type == IPARSER_NUMBER &&
             node->r->type == IPARSER_NUMBER)
         {
-            int v = iparser_call_f2
+            auto v= iparser_call_f2
                 (((struct iparser_f2*)node)->ftype,
                  ((struct iparser_number*)(((struct iparser_f2*)node)->l))->value,
                  ((struct iparser_number*)(((struct iparser_f2*)node)->r))->value);
@@ -901,7 +905,7 @@ iparser_ast_optimize (struct iparser_node* node)
             ((struct iparser_f3*)node)->n2->type == IPARSER_NUMBER &&
             ((struct iparser_f3*)node)->n3->type == IPARSER_NUMBER)
         {
-            int v = iparser_call_f3
+            auto v= iparser_call_f3
                 (((struct iparser_f3*)node)->ftype,
                  ((struct iparser_number*)(((struct iparser_f3*)node)->n1))->value,
                  ((struct iparser_number*)(((struct iparser_f3*)node)->n2))->value,
@@ -914,7 +918,7 @@ iparser_ast_optimize (struct iparser_node* node)
         iparser_ast_optimize(node->r);
         if (node->r->type == IPARSER_NUMBER)
         {
-            int v = node->lvp.v + ((struct iparser_number*)(node->r))->value;
+            auto v= node->lvp.v + ((struct iparser_number*)(node->r))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
         }
@@ -923,7 +927,7 @@ iparser_ast_optimize (struct iparser_node* node)
         iparser_ast_optimize(node->r);
         if (node->r->type == IPARSER_NUMBER)
         {
-            int v = node->lvp.v - ((struct iparser_number*)(node->r))->value;
+            auto v= node->lvp.v - ((struct iparser_number*)(node->r))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
         }
@@ -932,7 +936,7 @@ iparser_ast_optimize (struct iparser_node* node)
         iparser_ast_optimize(node->r);
         if (node->r->type == IPARSER_NUMBER)
         {
-            int v = node->lvp.v * ((struct iparser_number*)(node->r))->value;
+            auto v= node->lvp.v * ((struct iparser_number*)(node->r))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
         }
@@ -941,7 +945,7 @@ iparser_ast_optimize (struct iparser_node* node)
         iparser_ast_optimize(node->r);
         if (node->r->type == IPARSER_NUMBER)
         {
-            int v = node->lvp.v / ((struct iparser_number*)(node->r))->value;
+            auto v= node->lvp.v / ((struct iparser_number*)(node->r))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
         }
@@ -950,7 +954,7 @@ iparser_ast_optimize (struct iparser_node* node)
         iparser_ast_optimize(node->r);
         if (node->r->type == IPARSER_NUMBER)
         {
-            int v = ((struct iparser_number*)(node->r))->value / node->lvp.v;
+            auto v= ((struct iparser_number*)(node->r))->value / node->lvp.v;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
         }
@@ -959,7 +963,7 @@ iparser_ast_optimize (struct iparser_node* node)
         iparser_ast_optimize(node->l);
         if (node->l->type == IPARSER_NUMBER)
         {
-            int v = -((struct iparser_number*)(node->l))->value;
+            auto v= -((struct iparser_number*)(node->l))->value;
             ((struct iparser_number*)node)->type = IPARSER_NUMBER;
             ((struct iparser_number*)node)->value = v;
         }
@@ -976,7 +980,8 @@ iparser_ast_optimize (struct iparser_node* node)
     }
 }
 
-static
+namespace {
+
 void
 iparser_ast_print_f1 (struct iparser_f1* f1, std::string const& space, AllPrint& printer)
 {
@@ -989,7 +994,6 @@ iparser_ast_print_f1 (struct iparser_f1* f1, std::string const& space, AllPrint&
     iparser_ast_print(f1->l, space+"  ", printer);
 }
 
-static
 void
 iparser_ast_print_f2 (struct iparser_f2* f2, std::string const& space, AllPrint& printer)
 {
@@ -1038,7 +1042,6 @@ iparser_ast_print_f2 (struct iparser_f2* f2, std::string const& space, AllPrint&
     iparser_ast_print(f2->r, space+"  ", printer);
 }
 
-static
 void
 iparser_ast_print_f3 (struct iparser_f3* f3, std::string const& space, AllPrint& printer)
 {
@@ -1053,6 +1056,8 @@ iparser_ast_print_f3 (struct iparser_f3* f3, std::string const& space, AllPrint&
     iparser_ast_print(f3->n1, more_space, printer);
     iparser_ast_print(f3->n2, more_space, printer);
     iparser_ast_print(f3->n3, more_space, printer);
+}
+
 }
 
 void
@@ -1275,7 +1280,7 @@ iparser_ast_regvar (struct iparser_node* node, char const* name, int i)
     }
 }
 
-void iparser_ast_setconst (struct iparser_node* node, char const* name, int c)
+void iparser_ast_setconst (struct iparser_node* node, char const* name, long long c)
 {
     switch (node->type)
     {
@@ -1391,7 +1396,7 @@ iparser_regvar (struct amrex_iparser* iparser, char const* name, int i)
 }
 
 void
-iparser_setconst (struct amrex_iparser* iparser, char const* name, int c)
+iparser_setconst (struct amrex_iparser* iparser, char const* name, long long c)
 {
     iparser_ast_setconst(iparser->ast, name, c);
     iparser_ast_optimize(iparser->ast);
@@ -1420,6 +1425,41 @@ int
 iparser_depth (struct amrex_iparser* iparser)
 {
     return iparser_ast_depth(iparser->ast);
+}
+
+long long
+iparser_atoll (const char* str)
+{
+    std::string s(str);
+    s.erase(std::remove(s.begin(), s.end(), '\''), s.end());
+
+    auto pos_E = s.find('E');
+    if (pos_E != std::string::npos) {
+        s[pos_E] = 'e';
+    }
+    auto pos_e = s.find('e');
+    if (pos_e != std::string::npos) {
+        std::string part_1 = s.substr(0, pos_e);
+        int ex = std::atoi(s.c_str()+pos_e+1);
+        auto pos_dot = part_1.find('.');
+        if (pos_dot != std::string::npos) {
+            // iparser'number does not have more than one dot.
+            ex -= static_cast<int>(part_1.size()-(pos_dot+1));
+            part_1.erase(pos_dot,1);
+        }
+        if (ex < 0) {
+            throw std::runtime_error(std::string(str) + " is not an integer");
+        }
+        part_1.resize(part_1.size()+ex,'0');
+        return std::atoll(part_1.c_str());
+    } else {
+        auto pos_dot = s.find('.');
+        if (pos_dot != std::string::npos && pos_dot+1 < s.size()) {
+            throw std::runtime_error(std::string(str) + " is not an integer");
+        }
+        // Note that atoll works as expected for numbers ending with `.` like `123.`.
+        return std::atoll(s.c_str());
+    }
 }
 
 }

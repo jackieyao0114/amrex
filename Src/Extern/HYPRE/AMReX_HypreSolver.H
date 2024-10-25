@@ -217,7 +217,7 @@ HypreSolver<MSS>::HypreSolver (Vector<IndexType>   const& a_index_type,
     m_cell_offset.define(m_grids[0], m_dmap);
 #endif
 
-    fill_local_id(a_marker);
+    fill_local_id(std::forward<Marker>(a_marker));
 
     // At this point, m_local_id stores the ids local to each box.
     // m_nrows_grid stores the number of unique points in each box.
@@ -267,7 +267,7 @@ HypreSolver<MSS>::HypreSolver (Vector<IndexType>   const& a_index_type,
     m_b = m_hypre_ij->b();
     m_x = m_hypre_ij->x();
 
-    fill_matrix(a_filler);
+    fill_matrix(std::forward<Filler>(a_filler));
 }
 
 template <int MSS>
@@ -569,7 +569,7 @@ HypreSolver<MSS>::fill_matrix (Filler const& filler)
             Gpu::streamSynchronize();
             HYPRE_IJMatrixSetValues(m_A, nrows, ncols_vec.data(), rows,
                                     cols_vec.data(), mat_vec.data());
-            Gpu::synchronize();
+            Gpu::hypreSynchronize();
         }
     }
     HYPRE_IJMatrixAssemble(m_A);
@@ -653,7 +653,7 @@ HypreSolver<MSS>::load_vectors (Vector<MF      *> const& a_soln,
             Gpu::streamSynchronize();
             HYPRE_IJVectorSetValues(m_x, nrows, rows, xp);
             HYPRE_IJVectorSetValues(m_b, nrows, rows, bp);
-            Gpu::synchronize();
+            Gpu::hypreSynchronize();
         }
     }
 }
@@ -683,7 +683,7 @@ HypreSolver<MSS>::get_solution (Vector<MF*> const& a_soln)
             HYPRE_Int const* rows = m_global_id_vec[mfi].data();
 
             HYPRE_IJVectorGetValues(m_x, nrows, rows, xp);
-            Gpu::synchronize();
+            Gpu::hypreSynchronize();
 
             HYPRE_Int offset = 0;
             for (int ivar = 0; ivar < m_nvars; ++ivar) {

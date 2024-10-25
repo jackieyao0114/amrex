@@ -27,10 +27,7 @@
 
 namespace amrex {
 
-//
-// Set default values in Initialize()!!!
-//
-int     FabArrayBase::MaxComp;
+int FabArrayBase::MaxComp = 25;
 
 #if defined(AMREX_USE_GPU)
 
@@ -86,6 +83,8 @@ FabArrayBase::FabArrayStats        FabArrayBase::m_FA_stats;
 std::map<std::string,FabArrayBase::meminfo> FabArrayBase::m_mem_usage;
 std::vector<std::string>                    FabArrayBase::m_region_tag;
 
+bool                               FabArrayBase::m_alloc_single_chunk = false;
+
 namespace
 {
     bool initialized = false;
@@ -97,11 +96,6 @@ FabArrayBase::Initialize ()
     if (initialized) { return; }
     initialized = true;
 
-    //
-    // Set default values here!!!
-    //
-    FabArrayBase::MaxComp           = 25;
-
     ParmParse pp("fabarray");
 
     Vector<int> tilesize(AMREX_SPACEDIM);
@@ -110,17 +104,32 @@ FabArrayBase::Initialize ()
     {
         for (int i=0; i<AMREX_SPACEDIM; i++) { FabArrayBase::mfiter_tile_size[i] = tilesize[i]; }
     }
+    else
+    {
+        pp.addarr("mfiter_tile_size", std::vector<int>{AMREX_D_DECL(FabArrayBase::mfiter_tile_size[0],
+                                                                    FabArrayBase::mfiter_tile_size[1],
+                                                                    FabArrayBase::mfiter_tile_size[2])});
+    }
 
     if (pp.queryarr("comm_tile_size", tilesize, 0, AMREX_SPACEDIM))
     {
         for (int i=0; i<AMREX_SPACEDIM; i++) { FabArrayBase::comm_tile_size[i] = tilesize[i]; }
     }
+    else
+    {
+        pp.addarr("comm_tile_size", std::vector<int>{AMREX_D_DECL(FabArrayBase::comm_tile_size[0],
+                                                                  FabArrayBase::comm_tile_size[1],
+                                                                  FabArrayBase::comm_tile_size[2])});
+    }
 
-    pp.queryAdd("maxcomp",             FabArrayBase::MaxComp);
+    pp.query("maxcomp", FabArrayBase::MaxComp);
 
     if (MaxComp < 1) {
         MaxComp = 1;
     }
+
+    ParmParse ppmf("amrex.mf");
+    ppmf.queryAdd("alloc_single_chunk", FabArrayBase::m_alloc_single_chunk);
 
     amrex::ExecOnFinalize(FabArrayBase::Finalize);
 
@@ -179,7 +188,7 @@ FabArrayBase::define (const BoxArray&            bxs,
                       int                        nvar,
                       const IntVect&             ngrow)
 {
-    BL_ASSERT(ngrow.allGE(IntVect::TheZeroVector()));
+    BL_ASSERT(ngrow.allGE(0));
     BL_ASSERT(boxarray.empty());
     indexArray.clear();
     ownership.clear();
@@ -336,7 +345,7 @@ FabArrayBase::CPC::define (const BoxArray& ba_dst, const DistributionMapping& dm
 
         std::vector< std::pair<int,Box> > isects;
 
-        const std::vector<IntVect>& pshifts = m_period.shiftIntVect();
+        const std::vector<IntVect>& pshifts = m_period.shiftIntVect(ng_dst);
 
         auto& send_tags = *m_SndTags;
 
@@ -663,7 +672,7 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
     const IntVect ng_ng =nghost - 1;
     std::vector< std::pair<int,Box> > isects;
 
-    const std::vector<IntVect>& pshifts = period.shiftIntVect();
+    const std::vector<IntVect>& pshifts = period.shiftIntVect(nghost);
 
     auto& send_tags = *cmd.m_SndTags;
 
@@ -870,7 +879,7 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
 void
 FabArrayBase::FB::define_fb (const FabArrayBase& fa)
 {
-    AMREX_ASSERT(m_multi_ghost ? fa.nGrow() >= 2 : true); // must have >= 2 ghost nodes
+    AMREX_ASSERT(m_multi_ghost ? fa.nGrowVect().allGE(2) : true); // must have >= 2 ghost nodes
     AMREX_ASSERT(m_multi_ghost ? !m_period.isAnyPeriodic() : true); // this only works for non-periodic
 
     fa.define_fb_metadata(*this, m_ngrow, m_cross, m_period, m_multi_ghost);
@@ -892,7 +901,7 @@ FabArrayBase::FB::define_epo (const FabArrayBase& fa)
     const IndexType& typ = ba.ixType();
     std::vector< std::pair<int,Box> > isects;
 
-    const std::vector<IntVect>& pshifts = m_period.shiftIntVect();
+    const std::vector<IntVect>& pshifts = m_period.shiftIntVect(ng);
 
     auto& send_tags = *m_SndTags;
 
@@ -1044,7 +1053,7 @@ void FabArrayBase::FB::tag_one_box (int krcv, BoxArray const& ba, DistributionMa
 
     std::vector<std::pair<int,Box> > isects2;
     std::vector<std::tuple<int,Box,IntVect> > isects3;
-    auto const& pshifts = m_period.shiftIntVect();
+    auto const& pshifts = m_period.shiftIntVect(m_ngrow);
     for (auto const& shft: pshifts) {
         ba.intersections(gbx+shft, isects2);
         for (auto const& is2 : isects2) {
@@ -1135,7 +1144,7 @@ FabArrayBase::FB::define_os (const FabArrayBase& fa)
 
 #ifdef AMREX_USE_MPI
     if (ParallelDescriptor::NProcs() > 1) {
-        const std::vector<IntVect>& pshifts = m_period.shiftIntVect();
+        const std::vector<IntVect>& pshifts = m_period.shiftIntVect(m_ngrow);
         std::vector< std::pair<int,Box> > isects;
 
         std::set<int> my_receiver;
@@ -1325,8 +1334,7 @@ FabArrayBase::RB90::define (const FabArrayBase& fa)
                     {
                         Box bxsnd = (n==0) ? amrex::get<0>(dst_to_src)(bxrcv)
                                            : amrex::get<1>(dst_to_src)(bxrcv);
-                        send_tags[dst_owner].push_back(FabArrayBase::CopyComTag(bxrcv, bxsnd,
-                                                                                krcv, ksnd));
+                        send_tags[dst_owner].emplace_back(bxrcv, bxsnd, krcv, ksnd);
                     }
                 }
             }
@@ -1498,8 +1506,7 @@ FabArrayBase::RB180::define (const FabArrayBase& fa)
                 if (dst_owner != myproc) // local copy will be dealt with later
                 {
                     Box const& bxsnd = convert(bxrcv);
-                    send_tags[dst_owner].push_back(FabArrayBase::CopyComTag(bxrcv, bxsnd,
-                                                                            krcv, ksnd));
+                    send_tags[dst_owner].emplace_back(bxrcv, bxsnd, krcv, ksnd);
                 }
             }
         }
@@ -1683,8 +1690,7 @@ FabArrayBase::PolarB::define (const FabArrayBase& fa)
                     if (dst_owner != myproc) // local copy will be dealt with later
                     {
                         Box const bxsnd = (n<4) ? convert(bxrcv) : convert_corner(bxrcv);
-                        send_tags[dst_owner].push_back(FabArrayBase::CopyComTag(bxrcv, bxsnd,
-                                                                                krcv, ksnd));
+                        send_tags[dst_owner].emplace_back(bxrcv, bxsnd, krcv, ksnd);
                     }
                 }
             }
@@ -2698,5 +2704,73 @@ FabArrayBase::flushParForCache ()
 }
 
 #endif
+
+namespace detail {
+
+    SingleChunkArena::SingleChunkArena (Arena* a_arena, std::size_t a_size)
+        : m_dallocator(a_arena),
+          m_root((char*)m_dallocator.alloc(a_size)),
+          m_free(m_root),
+          m_size(a_size)
+    {}
+
+    SingleChunkArena::~SingleChunkArena ()
+    {
+        if (m_root) {
+            m_dallocator.free(m_root);
+        }
+    }
+
+    void* SingleChunkArena::alloc (std::size_t sz)
+    {
+        amrex::ignore_unused(m_size);
+        auto* p = (void*)m_free;
+        AMREX_ASSERT(sz <= m_size && ((m_free-m_root)+sz <= m_size));
+        m_free += sz;
+        return p;
+    }
+
+    void SingleChunkArena::free (void* /*pt*/) {}
+
+    bool SingleChunkArena::isDeviceAccessible () const {
+        return m_dallocator.arena()->isDeviceAccessible();
+    }
+
+    bool SingleChunkArena::isHostAccessible () const {
+        return m_dallocator.arena()->isHostAccessible();
+    }
+
+    bool SingleChunkArena::isManaged () const {
+        return m_dallocator.arena()->isManaged();
+    }
+
+    bool SingleChunkArena::isDevice () const {
+        return m_dallocator.arena()->isDevice();
+    }
+
+    bool SingleChunkArena::isPinned () const {
+        return m_dallocator.arena()->isPinned();
+    }
+}
+
+int nComp (FabArrayBase const& fa)
+{
+    return fa.nComp();
+}
+
+IntVect nGrowVect (FabArrayBase const& fa)
+{
+    return fa.nGrowVect();
+}
+
+BoxArray const& boxArray (FabArrayBase const& fa)
+{
+    return fa.boxArray();
+}
+
+DistributionMapping const& DistributionMap (FabArrayBase const& fa)
+{
+    return fa.DistributionMap();
+}
 
 }

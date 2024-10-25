@@ -1,9 +1,8 @@
 // Do not include this header anywhere other than AMReX_GpuLaunch.H.
 // The purpose of this file is to avoid clang-tidy.
 
-#define AMREX_WRONG_NUM_ARGS(...) static_assert(false,"Wrong number of arguments to macro")
-#define AMREX_GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,NAME,...) NAME
-#define AMREX_LAUNCH_DEVICE_LAMBDA(...) AMREX_GET_MACRO(__VA_ARGS__,\
+#define AMREX_GET_LAUNCH_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,NAME,...) NAME
+#define AMREX_LAUNCH_DEVICE_LAMBDA(...) AMREX_GET_LAUNCH_MACRO(__VA_ARGS__,\
                                                         AMREX_GPU_LAUNCH_DEVICE_LAMBDA_RANGE_3, \
                                                         AMREX_WRONG_NUM_ARGS, \
                                                         AMREX_WRONG_NUM_ARGS, \
@@ -14,7 +13,7 @@
                                                         AMREX_WRONG_NUM_ARGS, \
                                                         AMREX_WRONG_NUM_ARGS)(__VA_ARGS__)
 
-#define AMREX_LAUNCH_HOST_DEVICE_LAMBDA(...) AMREX_GET_MACRO(__VA_ARGS__,\
+#define AMREX_LAUNCH_HOST_DEVICE_LAMBDA(...) AMREX_GET_LAUNCH_MACRO(__VA_ARGS__,\
                                                         AMREX_GPU_LAUNCH_HOST_DEVICE_LAMBDA_RANGE_3, \
                                                         AMREX_WRONG_NUM_ARGS, \
                                                         AMREX_WRONG_NUM_ARGS, \
@@ -60,7 +59,7 @@
 #ifndef AMREX_USE_SYCL
 
 #define AMREX_HOST_DEVICE_PARALLEL_FOR_1D_FLAG(where_to_run,n,i,block) \
-    {  using amrex_i_inttype = typename std::remove_const<decltype(n)>::type; \
+    {  using amrex_i_inttype = std::remove_const_t<decltype(n)>; \
     if ((where_to_run == RunOn::Device) && (Gpu::inLaunchRegion())) \
     { \
         amrex::ParallelFor(n, [=] AMREX_GPU_DEVICE (amrex_i_inttype i) noexcept \
@@ -101,7 +100,7 @@
     }
 
 #define AMREX_HOST_DEVICE_FOR_1D_FLAG(where_to_run,n,i,block) \
-    {  using amrex_i_inttype = typename std::remove_const<decltype(n)>::type; \
+    {  using amrex_i_inttype = std::remove_const_t<decltype(n)>; \
     if ((where_to_run == RunOn::Device) && (Gpu::inLaunchRegion())) \
     { \
         amrex::ParallelFor(n, [=] AMREX_GPU_DEVICE (amrex_i_inttype i) noexcept \
@@ -186,7 +185,7 @@
 // xxxxx SYCL todo: host disabled in host device
 
 #define AMREX_HOST_DEVICE_PARALLEL_FOR_1D_FLAG(where_to_run,n,i,block) \
-    {  using amrex_i_inttype = typename std::remove_const<decltype(n)>::type; \
+    {  using amrex_i_inttype = std::remove_const_t<decltype(n)>; \
     if ((where_to_run == RunOn::Device) && (Gpu::inLaunchRegion())) \
     { \
         amrex::ParallelFor(n, [=] AMREX_GPU_DEVICE (amrex_i_inttype i) noexcept \
@@ -220,7 +219,7 @@
     }
 
 #define AMREX_HOST_DEVICE_FOR_1D_FLAG(where_to_run,n,i,block) \
-    {  using amrex_i_inttype = typename std::remove_const<decltype(n)>::type; \
+    {  using amrex_i_inttype = std::remove_const_t<decltype(n)>; \
     if ((where_to_run == RunOn::Device) && (Gpu::inLaunchRegion())) \
     { \
         amrex::ParallelFor(n, [=] AMREX_GPU_DEVICE (amrex_i_inttype i) noexcept \
@@ -290,7 +289,7 @@
 #else
 
 #define AMREX_HOST_DEVICE_PARALLEL_FOR_1D_FLAG(where_to_run,n,i,block) \
-    {  using amrex_i_inttype = typename std::remove_const<decltype(n)>::type; \
+    {  using amrex_i_inttype = std::remove_const_t<decltype(n)>; \
     amrex::ignore_unused(where_to_run); \
     AMREX_PRAGMA_SIMD \
     for (amrex_i_inttype i = 0; i < n; ++i) { \
@@ -310,7 +309,7 @@
     );
 
 #define AMREX_HOST_DEVICE_FOR_1D_FLAG(where_to_run,n,i,block) \
-    {  using amrex_i_inttype = typename std::remove_const<decltype(n)>::type; \
+    {  using amrex_i_inttype = std::remove_const_t<decltype(n)>; \
     amrex::ignore_unused(where_to_run); \
     for (amrex_i_inttype i = 0; i < n; ++i) { \
         block \

@@ -1,6 +1,5 @@
 
 #include <AMReX_AmrCore.H>
-#include <AMReX_Print.H>
 
 #ifdef AMREX_PARTICLES
 #include <AMReX_AmrParGDB.H>
@@ -227,7 +226,8 @@ AmrCore::printGridSummary (std::ostream& os, int min_lev, int max_lev) const noe
         }
     }
 
-    os << std::endl; // Make sure we flush!
+    os << '\n';
+    os.flush();
 }
 
 }

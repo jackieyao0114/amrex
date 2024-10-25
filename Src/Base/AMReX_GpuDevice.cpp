@@ -5,6 +5,10 @@
 #include <AMReX_Print.H>
 #include <AMReX_GpuLaunch.H>
 
+#ifdef AMREX_USE_HYPRE
+#  include <_hypre_utilities.h>
+#endif
+
 #include <iostream>
 #include <map>
 #include <algorithm>
@@ -15,7 +19,11 @@
 #if defined(AMREX_USE_CUDA)
 #include <cuda_profiler_api.h>
 #if defined(AMREX_PROFILING) || defined (AMREX_TINY_PROFILING)
-#include <nvToolsExt.h>
+#if __has_include(<nvtx3/nvToolsExt.h>)
+#  include <nvtx3/nvToolsExt.h>
+#else
+#  include <nvToolsExt.h>
+#endif
 #endif
 #endif
 
@@ -50,6 +58,20 @@ namespace {
             }
         }
     };
+}
+#endif
+
+#ifdef AMREX_USE_HIP
+namespace {
+    __host__ __device__ void amrex_check_wavefront_size () {
+#ifdef __HIP_DEVICE_COMPILE__
+        // https://github.com/AMReX-Codes/amrex/issues/3792
+        // __AMDGCN_WAVEFRONT_SIZE is valid in device code only.
+        // Thus we have to check it this way.
+        static_assert(__AMDGCN_WAVEFRONT_SIZE == AMREX_AMDGCN_WAVEFRONT_SIZE,
+                      "Please let the amrex team know if you encounter this");
+#endif
+    }
 }
 #endif
 
@@ -137,9 +159,9 @@ Device::Initialize ()
     max_gpu_streams = std::max(max_gpu_streams, 1);
 
     ParmParse pp("device");
-
-    pp.queryAdd("v", verbose);
-    pp.queryAdd("verbose", verbose);
+    if (! pp.query("verbose", "v", verbose)) {
+        pp.add("verbose", verbose);
+    }
 
     if (amrex::Verbose()) {
         AMREX_HIP_OR_CUDA_OR_SYCL
@@ -275,7 +297,7 @@ Device::Initialize ()
                     for (auto x : uuid) {
                         std::cout << std::hex << static_cast<unsigned int>(x) << "|";
                     }
-                    std::cout << std::endl;;
+                    std::cout << '\n';;
                 }
                 ParallelDescriptor::Barrier();
             }
@@ -306,6 +328,14 @@ Device::Initialize ()
 
 #if defined(AMREX_USE_CUDA) && (defined(AMREX_PROFILING) || defined(AMREX_TINY_PROFILING))
     nvtxRangePop();
+#endif
+
+#if defined(AMREX_USE_HIP)
+    if (num_devices_used < 0) {
+        // This test is always false, but it makes the compiler no longer
+        // complain about unused function, amrex_check_wavefront_size.
+        amrex::single_task(amrex_check_wavefront_size);
+    }
 #endif
 
     Device::profilerStart();
@@ -354,6 +384,8 @@ Device::initialize_gpu ()
 
     AMREX_HIP_SAFE_CALL(hipGetDeviceProperties(&device_prop, device_id));
 
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(warp_size == device_prop.warpSize, "Incorrect warp size");
+
     // check compute capability
 
     // AMD devices do not support shared cache banking.
@@ -362,21 +394,27 @@ Device::initialize_gpu ()
         AMREX_HIP_SAFE_CALL(hipStreamCreate(&gpu_stream_pool[i]));
     }
 
+#ifdef AMREX_GPU_STREAM_ALLOC_SUPPORT
+    AMREX_HIP_SAFE_CALL(hipDeviceGetAttribute(&memory_pools_supported, hipDeviceAttributeMemoryPoolsSupported, device_id));
+#endif
+
 #elif defined(AMREX_USE_CUDA)
     AMREX_CUDA_SAFE_CALL(cudaGetDeviceProperties(&device_prop, device_id));
 
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(device_prop.major >= 4 || (device_prop.major == 3 && device_prop.minor >= 5),
                                      "Compute capability must be >= 3.5");
 
-#ifdef AMREX_CUDA_GE_11_2
+#ifdef AMREX_GPU_STREAM_ALLOC_SUPPORT
     cudaDeviceGetAttribute(&memory_pools_supported, cudaDevAttrMemoryPoolsSupported, device_id);
 #endif
 
+#if (__CUDACC_VER_MAJOR__ < 12) || ((__CUDACC_VER_MAJOR__ == 12) && (__CUDACC_VER_MINOR__ < 4))
     if (sizeof(Real) == 8) {
         AMREX_CUDA_SAFE_CALL(cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte));
     } else if (sizeof(Real) == 4) {
         AMREX_CUDA_SAFE_CALL(cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeFourByte));
     }
+#endif
 
     for (int i = 0; i < max_gpu_streams; ++i) {
         AMREX_CUDA_SAFE_CALL(cudaStreamCreate(&gpu_stream_pool[i]));
@@ -440,7 +478,7 @@ Device::initialize_gpu ()
                            << "  managedMemory: " << (device_prop.managedMemory ? "Yes" : "No") << "\n"
                            << "  concurrentManagedAccess: " << (device_prop.concurrentManagedAccess ? "Yes" : "No") << "\n"
                            << "  maxParameterSize: " << device_prop.maxParameterSize << "\n"
-                           << std::endl;
+                           << '\n';
 #if defined(__INTEL_LLVM_COMPILER)
             if (d.has(sycl::aspect::ext_intel_gpu_eu_simd_width)) {
                 auto r = d.get_info<sycl::ext::intel::info::device::gpu_eu_simd_width>();
@@ -485,9 +523,9 @@ Device::initialize_gpu ()
     int ny = 0;
     int nz = 0;
 
-    pp.queryAdd("numThreads.x", nx);
-    pp.queryAdd("numThreads.y", ny);
-    pp.queryAdd("numThreads.z", nz);
+    pp.query("numThreads.x", nx);
+    pp.query("numThreads.y", ny);
+    pp.query("numThreads.z", nz);
 
     numThreadsOverride.x = (int) nx;
     numThreadsOverride.y = (int) ny;
@@ -497,9 +535,9 @@ Device::initialize_gpu ()
     ny = 0;
     nz = 0;
 
-    pp.queryAdd("numBlocks.x", nx);
-    pp.queryAdd("numBlocks.y", ny);
-    pp.queryAdd("numBlocks.z", nz);
+    pp.query("numBlocks.x", nx);
+    pp.query("numBlocks.y", ny);
+    pp.query("numBlocks.z", nz);
 
     numBlocksOverride.x = (int) nx;
     numBlocksOverride.y = (int) ny;
@@ -508,8 +546,8 @@ Device::initialize_gpu ()
     // Graph initialization
     int graph_init = 0;
     int graph_size = 10000;
-    pp.queryAdd("graph_init", graph_init);
-    pp.queryAdd("graph_init_nodes", graph_size);
+    pp.query("graph_init", graph_init);
+    pp.query("graph_init_nodes", graph_size);
 
     if (graph_init)
     {
@@ -717,7 +755,7 @@ Device::instantiateGraph(cudaGraph_t graph)
 
     if (graph_log[0] != '\0')
     {
-        amrex::Print() << graph_log << std::endl;
+        amrex::Print() << graph_log << '\n';
         AMREX_GPU_ERROR_CHECK();
     }
 #else
@@ -998,5 +1036,14 @@ Device::profilerStop ()
     roctracer_stop();
 #endif
 }
+
+#ifdef AMREX_USE_HYPRE
+void hypreSynchronize ()
+{
+#ifdef AMREX_USE_GPU
+    hypre_SyncCudaDevice(hypre_handle()); // works for non-cuda device too
+#endif
+}
+#endif
 
 }

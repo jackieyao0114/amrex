@@ -6,6 +6,7 @@
 #include <AMReX_IndexType.H>
 #include <AMReX_BoxList.H>
 #include <AMReX_Array.H>
+#include <AMReX_Periodicity.H>
 #include <AMReX_Vector.H>
 
 #include <iosfwd>
@@ -51,6 +52,24 @@ namespace amrex
 
     //! Note that two BoxArrays that match are not necessarily equal.
     [[nodiscard]] bool match (const BoxArray& x, const BoxArray& y);
+
+    /**
+     * \brief Decompose domain box into BoxArray
+     *
+     * The returned BoxArray has nboxes Boxes, unless the the domain is too
+     * small. We aim to decompose the domain into subdomains that are as
+     * cubic as possible, even if this results in Boxes with odd numbers of
+     * cells. Thus, this function is generally not suited for applications
+     * with multiple AMR levels or for multigrid solvers.
+     *
+     * \param domain Domain Box
+     * \param nboxes the target number of Boxes
+     * \param decomp controls whether domain decomposition should be done in
+     *               that direction.
+     */
+    [[nodiscard]] BoxArray decompose (Box const& domain, int nboxes,
+                                      Array<bool,AMREX_SPACEDIM> const& decomp
+                                      = {AMREX_D_DECL(true,true,true)});
 
 struct BARef
 {
@@ -515,16 +534,16 @@ struct BATransformer
 // for backward compatibility
 using BndryBATransformer = BATransformer;
 
-/**
-* \brief A collection of Boxes stored in an Array.  It is a
-* reference-counted concrete class, not a polymorphic one; i.e. you
-* cannot use any of the List member functions with a BoxList.
-*/
-
 class MFIter;
 class AmrMesh;
 class FabArrayBase;
 
+/**
+ * \brief A collection of Boxes stored in an Array.
+ *
+ * It is a reference-counted concrete class, not a polymorphic one; i.e. you
+ * cannot use any of the List member functions with a BoxList.
+ */
 class BoxArray
 {
 public:
@@ -613,6 +632,11 @@ public:
     BoxArray& maxSize (int block_size);
 
     BoxArray& maxSize (const IntVect& block_size);
+
+    //! Forces each Box in BoxArray to have sizes >= min_size and <=
+    //! max_size. It's the caller's responsibility to make sure both the
+    //! BoxArray and max_size are coarsenable by min_size.
+    BoxArray& minmaxSize (const IntVect& min_size, const IntVect& max_size);
 
     //! Refine each Box in the BoxArray to the specified ratio.
     BoxArray& refine (int refinement_ratio);
@@ -734,6 +758,16 @@ public:
     [[nodiscard]]
     bool contains (const BoxArray& ba, bool assume_disjoint_ba = false,
                    const IntVect& ng = IntVect(0)) const;
+
+    /**
+     * \brief True if all cells in ba are periodically contained in this
+     * BoxArray.
+     *
+     * If a cell after being periodically shifted is contained in this
+     * BoxArray, it's considered being periodically contained.
+     */
+    [[nodiscard]]
+    bool contains (const BoxArray& ba, Periodicity const& period) const;
 
     //! Return smallest Box that contains all Boxes in this BoxArray.
     [[nodiscard]] Box minimalBox () const;

@@ -296,9 +296,9 @@ struct Identity  {
 static constexpr Identity identity{};
 
 static_assert(sizeof(Identity) == 1 );
-static_assert(std::is_trivially_default_constructible<Identity>::value );
-static_assert(std::is_trivially_copy_assignable<Identity>::value );
-static_assert(std::is_trivially_copy_constructible<Identity>::value );
+static_assert(std::is_trivially_default_constructible_v<Identity> );
+static_assert(std::is_trivially_copy_assignable_v<Identity> );
+static_assert(std::is_trivially_copy_constructible_v<Identity> );
 static_assert(IsIndexMapping<Identity>() ); // NOLINT(bugprone-throw-keyword-missing)
 static_assert(IsFabProjection<Identity, FArrayBox>() ); // NOLINT(bugprone-throw-keyword-missing)
 
@@ -882,9 +882,16 @@ ParallelCopy (FabArray<FAB>& dest, const FabArray<FAB>& src, const FabArrayBase:
     components.dest_component = destcomp.i;
     components.src_component = srccomp.i;
     components.n_components = numcomp.n;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
     ApplyDtosAndProjectionOnReciever<DTOS, Proj> packing{components, dtos, proj};
     CommHandler handler = ParallelCopy_nowait(dest, src, cmd, packing);
     ParallelCopy_finish(dest, std::move(handler), cmd, packing); // NOLINT
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 }
 
 //! \brief Call ParallelCopy_nowait followed by ParallelCopy_finish.
@@ -1129,7 +1136,7 @@ FillBoundary_finish (CommHandler handler,
     auto cmd = makeFillBoundaryMetaData(mf, mf.nGrowVect, geom, dtos);
     // The metadata cmd can be cached and reused on a MultiFab/FabArray with
     // the same BoxArray and DistributionMapping.
-    FillBoundary_finish(mf, cmd, scomp, ncomp, dtos, proj);
+    FillBoundary(mf, cmd, scomp, ncomp, dtos, proj);
 \endverbatim
  *
  * The FillBoundary capability here is more flexible than FabArray's

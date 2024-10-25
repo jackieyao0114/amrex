@@ -30,8 +30,7 @@ void set_eb_data (const int i, const int j,
     const Real apnorm = std::hypot(daxp,dayp) + 1.e-30_rt*std::sqrt(dx[0]*dx[1]);
     const Real nx = daxp * (1.0_rt/apnorm);
     const Real ny = dayp * (1.0_rt/apnorm);
-    const Real bareascaling = std::sqrt( (nx*dx[0])*(nx*dx[0]) +
-            (ny*dx[1])*(ny*dx[1]) );
+    const Real bareascaling = std::sqrt(Math::powi<2>(nx*dx[1]) + Math::powi<2>(ny*dx[0]));
 
     const Real nxabs = std::abs(nx);
     const Real nyabs = std::abs(ny);
@@ -343,7 +342,8 @@ int build_faces (Box const& bx, Array4<EBCellFlag> const& cell,
     nsmallfaces += *(hp+1);
 
     if (*hp > 0 && !cover_multiple_cuts) {
-        amrex::Abort("amrex::EB2::build_faces: more than 2 cuts not supported");
+        amrex::Abort("amrex::EB2::build_faces: more than 2 cuts not supported. "
+                     "You can try to fix it by using runtime parameter eb2.cover_multiple_cuts=1.");
     }
 
     return *hp;

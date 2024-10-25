@@ -8,6 +8,7 @@ ifneq ($(NO_CONFIG_CHECKING),TRUE)
   ifeq ($(HIP_PATH),)
     $(error hipconfig failed. Is the HIP toolkit available?)
   endif
+  COMP_VERSION = $(hipcc_version)
 endif
 
 CXX = $(HIP_PATH)/bin/hipcc
@@ -91,10 +92,10 @@ ifeq ($(HIP_COMPILER),clang)
 
   else  # DEBUG=FALSE flags
 
-    CXXFLAGS += -g -O3 -munsafe-fp-atomics
-    CFLAGS   += -g -O3
-    FFLAGS   += -g -O3
-    F90FLAGS += -g -O3
+    CXXFLAGS += -gline-tables-only -fdebug-info-for-profiling -O3 -munsafe-fp-atomics
+    CFLAGS   += -gline-tables-only -fdebug-info-for-profiling -O3
+    FFLAGS   += -g1 -O3
+    F90FLAGS += -g1 -O3
 
   endif
 
@@ -118,8 +119,8 @@ ifeq ($(HIP_COMPILER),clang)
   endif
 
   # Generic HIP info
-  ROC_PATH=$(realpath $(dir $(HIP_PATH)))
-  SYSTEM_INCLUDE_LOCATIONS += $(ROC_PATH)/include $(HIP_PATH)/include
+  ROC_PATH=$(realpath $(HIP_PATH))
+  SYSTEM_INCLUDE_LOCATIONS += $(ROC_PATH)/include
 
   # rocRand
   SYSTEM_INCLUDE_LOCATIONS += $(ROC_PATH)/include/hiprand $(ROC_PATH)/include/rocrand

@@ -57,6 +57,7 @@ EXP	([Ee][-+]?[0-9]+)
 "ceil"        { amrex_parserlval.f1 = amrex::PARSER_CEIL;      return F1; }
 "comp_ellint_1" { amrex_parserlval.f1 = amrex::PARSER_COMP_ELLINT_1; return F1; }
 "comp_ellint_2" { amrex_parserlval.f1 = amrex::PARSER_COMP_ELLINT_2; return F1; }
+"erf"         { amrex_parserlval.f1 = amrex::PARSER_ERF;       return F1; }
 "**"          { amrex_parserlval.f2 = amrex::PARSER_POW;       return POW;}
 "^"           { amrex_parserlval.f2 = amrex::PARSER_POW;       return POW;}
 "atan2"       { amrex_parserlval.f2 = amrex::PARSER_ATAN2;     return F2; }
@@ -75,7 +76,7 @@ EXP	([Ee][-+]?[0-9]+)
 "if"          { amrex_parserlval.f3 = amrex::PARSER_IF;        return F3; }
 
  /* We use SYMBOL to hold variables and constants */
-[a-zA-Z_][a-zA-Z0-9_]*  { amrex_parserlval.s = amrex::parser_makesymbol(amrex_parsertext); return SYMBOL; }
+[a-zA-Z_][a-zA-Z0-9_\.]*  { amrex_parserlval.s = amrex::parser_makesymbol(amrex_parsertext); return SYMBOL; }
 
  /* Number */
 [0-9]+"."[0-9]*{EXP}? |
