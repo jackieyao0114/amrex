@@ -125,8 +125,8 @@ else()
    #
    # List of subdirectories to search for CMakeLists.
    #
-   set( AMREX_TESTS_SUBDIRS Amr AsyncOut CLZ CTOParFor DeviceGlobal Enum
-                            MultiBlock MultiPeriod ParmParse Parser Parser2 Reinit
+   set( AMREX_TESTS_SUBDIRS Amr AsyncOut CLZ CommType CTOParFor DeviceGlobal Enum
+                            MultiBlock MultiPeriod ParmParse Parser Parser2 ParserUserFn Reinit
                             RoundoffDomain SmallMatrix)
 
    if (AMReX_PARTICLES)
@@ -138,7 +138,7 @@ else()
    endif ()
 
    if (AMReX_LINEAR_SOLVERS)
-      list(APPEND AMREX_TESTS_SUBDIRS LinearSolvers)
+      list(APPEND AMREX_TESTS_SUBDIRS Algebra LinearSolvers)
    endif ()
 
    if (AMReX_FFT)

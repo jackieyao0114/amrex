@@ -33,6 +33,8 @@ bool VisMF::usePersistentIFStreams(false);
 bool VisMF::useSynchronousReads(false);
 bool VisMF::useDynamicSetSelection(true);
 bool VisMF::allowSparseWrites(true);
+bool VisMF::noFlushAfterWrite(false);
+bool VisMF::barrierAfterLevel(false);
 
 Long VisMFBuffer::ioBufferSize(VisMF::IO_Buffer_Size);
 
@@ -137,6 +139,8 @@ VisMF::Initialize ()
     pp.query("usedynamicsetselection", useDynamicSetSelection);
     pp.query("iobuffersize", ioBufferSize);
     pp.query("allowsparsewrites", allowSparseWrites);
+    pp.query("noflushafterwrite", noFlushAfterWrite);
+    pp.query("barrierafterlevel", barrierAfterLevel);
 
     initialized = true;
 }
@@ -1110,6 +1114,7 @@ VisMF::Write (const FabArray<FArrayBox>&    mf,
             nfi.Stream().write(allFabData, bytesWritten);
             nfi.Stream().flush();
             delete [] allFabData;
+            if (! nfi.Stream().good()) { amrex::Error("VisMF::Write failed"); }
 
         } else {    // ---- write fabs individually
             for(MFIter mfi(mf); mfi.isValid(); ++mfi) {
@@ -1123,7 +1128,6 @@ VisMF::Write (const FabArray<FArrayBox>&    mf,
                     hLength = static_cast<std::streamoff>(hss.tellp());
                     auto tstr = hss.str();
                     nfi.Stream().write(tstr.c_str(), hLength);    // ---- the fab header
-                    nfi.Stream().flush();
                 }
                 Real const* fabdata = fab.dataPtr();
 #ifdef AMREX_USE_GPU
@@ -1143,13 +1147,16 @@ VisMF::Write (const FabArray<FArrayBox>&    mf,
                                                             writeDataItems,
                                                             fabdata, *whichRD);
                     nfi.Stream().write(cDataPtr, writeDataSize);
-                    nfi.Stream().flush();
                     delete [] cDataPtr;
                 } else {    // ---- copy from the fab
                     nfi.Stream().write((char *) fabdata, writeDataSize);
-                    nfi.Stream().flush();
                 }
             }
+            if (!noFlushAfterWrite) {
+                nfi.Stream().flush();
+            }
+
+            if (! nfi.Stream().good()) { amrex::Error("VisMF::Write failed"); }
         }
     }
 
@@ -1481,6 +1488,8 @@ VisMF::readFAB (int                  idx,
 #endif
     }
 
+    if (!(infs->good())) { amrex::Error("VisMF::readFAB failed"); }
+
     VisMF::CloseStream(FullName);
 
     return fab;
@@ -1527,6 +1536,8 @@ VisMF::readFAB (FabArray<FArrayBox> &mf,
     } else {
       fab.readFrom(*infs);
     }
+
+    if (!(infs->good())) { amrex::Error("VisMF::readFAB failed"); }
 
     VisMF::CloseStream(FullName);
 }
@@ -1710,7 +1721,7 @@ VisMF::Read (FabArray<FArrayBox> &mf,
           frcIter = FileReadChains.find(fileName);
           BL_ASSERT(frcIter != FileReadChains.end());
           Vector<FabReadLink> &frc = frcIter->second;
-          for(NFilesIter nfi(std::move(fullFileName), readRanks); nfi.ReadyToRead(); ++nfi) {
+          for(NFilesIter nfi(std::move(fullFileName), std::move(readRanks)); nfi.ReadyToRead(); ++nfi) {
 
               // ---- confirm the data is contiguous in the stream
               Long firstOffset(-1);
@@ -1826,6 +1837,8 @@ VisMF::Read (FabArray<FArrayBox> &mf,
                   }
                 }
               }
+
+              if (! nfi.Stream().good()) { amrex::Error("VisMF::Read failed"); }
 
           }    // ---- end NFilesIter
         }
@@ -2520,6 +2533,7 @@ VisMF::AsyncWriteDoit (const FabArray<FArrayBox>& mf, const std::string& mf_name
                 fabio->write(ofs, fab, 0, fab.nComp());
             }
             ofs.flush();
+            if (!ofs.good()) { amrex::Error("VisMF::AsyncWriteDoit failed"); }
             ofs.close();
         }
 

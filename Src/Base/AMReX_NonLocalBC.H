@@ -206,7 +206,7 @@ static_assert(IsIndexMapping<MultiBlockIndexMapping>(), // NOLINT(bugprone-throw
 //! \brief This class stores data dependencies for an inter-block communication.
 //!
 //! In communication between two blocks one might need to do an index
-//! transformation from one block to antoher.
+//! transformation from one block to another.
 struct MultiBlockCommMetaData : FabArrayBase::CommMetaData {
     //! \name Constructors
 
@@ -430,6 +430,7 @@ struct CommData {
     Vector<MPI_Status> stats{};
     //! \brief For each request the copy comm tags for the corresponding data FABs.
     Vector<const FabArrayBase::CopyComTagsContainer*> cctc{};
+    std::uint64_t id = std::numeric_limits<std::uint64_t>::max();
 #endif
 };
 
@@ -476,6 +477,9 @@ template <typename... Args>
 using LocalCopy_t = decltype(LocalCopy(std::declval<Args>()...));
 
 //! \brief This type trait tests if a given type DP satisfies the DataPacking concept for type FAB.
+#if defined(AMREX_USE_CUDA) && defined(_WIN32)
+template <typename DP, typename FAB> struct IsDataPacking : std::true_type {};
+#else
 template <typename DP, typename FAB>
 struct IsDataPacking :
     Conjunction<
@@ -487,6 +491,7 @@ struct IsDataPacking :
         IsDetected<UnpackRecvBuffers_t, DP&, FabArray<FAB>&, CommData&>
 #endif
     > {};
+#endif
 
 template <class FAB, class DTOS = Identity, class Proj = Identity>
 std::enable_if_t<IsBaseFab<FAB>() && IsCallableR<Dim3, DTOS, Dim3>() && IsFabProjection<Proj, FAB>()>
@@ -576,7 +581,7 @@ PackSendBuffers (const PackComponents& components, const FabArray<FAB>& src, Com
 #ifdef AMREX_USE_GPU
     if (Gpu::inLaunchRegion()) {
         FabArray<FAB>::pack_send_buffer_gpu(src, components.src_component, components.n_components,
-                                            send.data, send.size, send.cctc);
+                                            send.data, send.size, send.cctc, send.id);
     } else
 #endif // AMREX_USE_GPU
     {

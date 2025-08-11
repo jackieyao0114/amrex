@@ -36,6 +36,8 @@ struct ParticleTileData
     using ParticleType = T_ParticleType;
     using ParticleRefType = T_ParticleType&;
     using Self = ParticleTileData<ParticleType, NAR, NAI>;
+    using RealType = ParticleReal;
+    using IntType = int;
 
     static constexpr int NStructReal = ParticleType::NReal;
     static constexpr int NStructInt = ParticleType::NInt;
@@ -60,7 +62,7 @@ struct ParticleTileData
     int* AMREX_RESTRICT * AMREX_RESTRICT m_runtime_idata;
 
     [[nodiscard]] AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-    ParticleReal& pos (const int dir, const int index) const &
+    decltype(auto) pos (const int dir, const int index) const &
     {
         if constexpr(!ParticleType::is_soa_particle) {
             return this->m_aos[index].pos(dir);
@@ -95,7 +97,7 @@ struct ParticleTileData
         if constexpr(ParticleType::is_soa_particle) {
             return this->m_idcpu[index];
         } else {
-            amrex::Abort("not implemented");
+            return this->m_aos[index].idcpu();
         }
     }
 
@@ -134,7 +136,10 @@ struct ParticleTileData
             memcpy(dst, m_idcpu + src_index, sizeof(uint64_t));
             dst += sizeof(uint64_t);
         }
-        int array_start_index  = AMREX_SPACEDIM + NStructReal;
+        int array_start_index = 0;
+        if constexpr (!ParticleType::is_soa_particle) {
+            array_start_index = AMREX_SPACEDIM + NStructReal;
+        }
         for (int i = 0; i < NAR; ++i)
         {
             if (comm_real[array_start_index + i])
@@ -143,7 +148,7 @@ struct ParticleTileData
                 dst += sizeof(ParticleReal);
             }
         }
-        int runtime_start_index  = AMREX_SPACEDIM + NStructReal + NAR;
+        int runtime_start_index  = array_start_index + NAR;
         for (int i = 0; i < m_num_runtime_real; ++i)
         {
             if (comm_real[runtime_start_index + i])
@@ -185,16 +190,21 @@ struct ParticleTileData
             memcpy(m_idcpu + dst_index, src, sizeof(uint64_t));
             src += sizeof(uint64_t);
         }
-        int array_start_index  = AMREX_SPACEDIM + NStructReal;
-        for (int i = 0; i < NAR; ++i)
-        {
-            if (comm_real[array_start_index + i])
+        int array_start_index = 0;
+        if constexpr (!ParticleType::is_soa_particle) {
+            array_start_index = AMREX_SPACEDIM + NStructReal;
+        }
+        if constexpr (NAR > 0) {
+            for (int i = 0; i < NAR; ++i)
             {
-                memcpy(m_rdata[i] + dst_index, src, sizeof(ParticleReal));
-                src += sizeof(ParticleReal);
+                if (comm_real[array_start_index + i])
+                {
+                    memcpy(m_rdata[i] + dst_index, src, sizeof(ParticleReal));
+                    src += sizeof(ParticleReal);
+                }
             }
         }
-        int runtime_start_index  = AMREX_SPACEDIM + NStructReal + NAR;
+        int runtime_start_index  = array_start_index + NAR;
         for (int i = 0; i < m_num_runtime_real; ++i)
         {
             if (comm_real[runtime_start_index + i])
@@ -204,12 +214,14 @@ struct ParticleTileData
             }
         }
         array_start_index  = 2 + NStructInt;
-        for (int i = 0; i < NAI; ++i)
-        {
-            if (comm_int[array_start_index + i])
+        if constexpr (NAI > 0) {
+            for (int i = 0; i < NAI; ++i)
             {
-                memcpy(m_idata[i] + dst_index, src, sizeof(int));
-                src += sizeof(int);
+                if (comm_int[array_start_index + i])
+                {
+                    memcpy(m_idata[i] + dst_index, src, sizeof(int));
+                    src += sizeof(int);
+                }
             }
         }
         runtime_start_index  = 2 + NStructInt + NAI;
@@ -235,16 +247,20 @@ struct ParticleTileData
         for (int i = 0; i < NStructReal; ++i) {
             sp.rdata(i) = m_aos[index].rdata(i);
         }
-        for (int i = 0; i < NAR; ++i) {
-            sp.rdata(NStructReal+i) = m_rdata[i][index];
+        if constexpr (NAR >0) {
+            for (int i = 0; i < NAR; ++i) {
+                sp.rdata(NStructReal+i) = m_rdata[i][index];
+            }
         }
         sp.id() = m_aos[index].id();
         sp.cpu() = m_aos[index].cpu();
         for (int i = 0; i < NStructInt; ++i) {
             sp.idata(i) = m_aos[index].idata(i);
         }
-        for (int i = 0; i < NAI; ++i) {
-            sp.idata(NStructInt+i) = m_idata[i][index];
+        if constexpr (NAI > 0) {
+            for (int i = 0; i < NAI; ++i) {
+                sp.idata(NStructInt+i) = m_idata[i][index];
+            }
         }
         return sp;
     }
@@ -305,7 +321,7 @@ struct ParticleTileData
 
 // SOA Particle Structure
 template <int T_NArrayReal, int T_NArrayInt>
-struct ConstSoAParticle : SoAParticleBase
+struct alignas(sizeof(double)) ConstSoAParticle : SoAParticleBase
 {
     static constexpr int NArrayReal = T_NArrayReal;
     static constexpr int NArrayInt = T_NArrayInt;
@@ -315,6 +331,7 @@ struct ConstSoAParticle : SoAParticleBase
     static constexpr bool is_constsoa_particle = true;
 
     using RealType = ParticleReal;
+    using IntType = int;
 
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
     ConstSoAParticle (ConstPTD const& ptd, long i) : // Note: should this be int instead?
@@ -360,14 +377,14 @@ struct ConstSoAParticle : SoAParticleBase
 
     private :
 
-    static_assert(std::is_trivially_copyable<ParticleTileData<SoAParticleBase, NArrayReal, NArrayInt>>(), "ParticleTileData is not trivially copyable");
+    static_assert(std::is_trivially_copyable<ConstPTD>(), "ParticleTileData is not trivially copyable");
 
     ConstPTD m_constparticle_tile_data;
     int m_index;
 };
 
 template <int T_NArrayReal, int T_NArrayInt>
-struct SoAParticle : SoAParticleBase
+struct alignas(sizeof(double)) SoAParticle : SoAParticleBase
 {
     static constexpr int NArrayReal = T_NArrayReal;
     static constexpr int NArrayInt = T_NArrayInt;
@@ -378,6 +395,7 @@ struct SoAParticle : SoAParticleBase
 
     using ConstType = ConstSoAParticle<T_NArrayReal, T_NArrayInt>;
     using RealType = ParticleReal;
+    using IntType = int;
 
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
     SoAParticle (PTD const& ptd, long i) : // Note: should this be int instead?
@@ -393,7 +411,7 @@ struct SoAParticle : SoAParticleBase
     ParticleCPUWrapper cpu () & { return this->m_particle_tile_data.m_idcpu[m_index]; }
 
     [[nodiscard]] AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-    ParticleIDWrapper id () & { return this->m_particle_tile_data.m_idcpu[m_index]; }
+    ParticleIDWrapper<> id () & { return this->m_particle_tile_data.m_idcpu[m_index]; }
 
     [[nodiscard]] AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
     uint64_t& idcpu () & { return this->m_particle_tile_data.m_idcpu[m_index]; }
@@ -442,7 +460,7 @@ struct SoAParticle : SoAParticleBase
 
 private :
 
-    static_assert(std::is_trivially_copyable<ParticleTileData<SoAParticleBase, NArrayReal, NArrayInt>>(), "ParticleTileData is not trivially copyable");
+    static_assert(std::is_trivially_copyable<PTD>(), "ParticleTileData is not trivially copyable");
 
     PTD m_particle_tile_data;
     int m_index;
@@ -497,6 +515,8 @@ struct ConstParticleTileData
     static constexpr int NAI = NArrayInt;
     using ParticleType = T_ParticleType;
     using ParticleRefType = T_ParticleType const&;
+    using RealType = ParticleReal;
+    using IntType = int;
 
     static constexpr int NStructReal = ParticleType::NReal;
     static constexpr int NStructInt = ParticleType::NInt;
@@ -516,7 +536,7 @@ struct ConstParticleTileData
     GpuArray<const int*, NArrayInt > m_idata;
 
     [[nodiscard]] AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-    const ParticleReal& pos (const int dir, const int index) const &
+    decltype(auto) pos (const int dir, const int index) const &
     {
         if constexpr(!ParticleType::is_soa_particle) {
             return this->m_aos[index].pos(dir);
@@ -551,7 +571,7 @@ struct ConstParticleTileData
         if constexpr(ParticleType::is_soa_particle) {
             return this->m_idcpu[index];
         } else {
-            amrex::Abort("not implemented");
+            return this->m_aos[index].idcpu();
         }
     }
 
@@ -595,16 +615,21 @@ struct ConstParticleTileData
             memcpy(dst, m_idcpu + src_index, sizeof(uint64_t));
             dst += sizeof(uint64_t);
         }
-        int array_start_index  = AMREX_SPACEDIM + NStructReal;
-        for (int i = 0; i < NArrayReal; ++i)
-        {
-            if (comm_real[array_start_index + i])
+        int array_start_index = 0;
+        if constexpr (!ParticleType::is_soa_particle) {
+            array_start_index = AMREX_SPACEDIM + NStructReal;
+        }
+        if constexpr (NArrayReal > 0) {
+            for (int i = 0; i < NArrayReal; ++i)
             {
-                memcpy(dst, m_rdata[i] + src_index, sizeof(ParticleReal));
-                dst += sizeof(ParticleReal);
+                if (comm_real[array_start_index + i])
+                {
+                    memcpy(dst, m_rdata[i] + src_index, sizeof(ParticleReal));
+                    dst += sizeof(ParticleReal);
+                }
             }
         }
-        int runtime_start_index  = AMREX_SPACEDIM + NStructReal + NArrayReal;
+        int runtime_start_index  = array_start_index + NArrayReal;
         for (int i = 0; i < m_num_runtime_real; ++i)
         {
             if (comm_real[runtime_start_index + i])
@@ -614,12 +639,14 @@ struct ConstParticleTileData
             }
         }
         array_start_index  = 2 + NStructInt;
-        for (int i = 0; i < NArrayInt; ++i)
-        {
-            if (comm_int[array_start_index + i])
+        if constexpr (NArrayInt > 0) {
+            for (int i = 0; i < NArrayInt; ++i)
             {
-                memcpy(dst, m_idata[i] + src_index, sizeof(int));
-                dst += sizeof(int);
+                if (comm_int[array_start_index + i])
+                {
+                    memcpy(dst, m_idata[i] + src_index, sizeof(int));
+                    dst += sizeof(int);
+                }
             }
         }
         runtime_start_index  = 2 + NStructInt + NArrayInt;

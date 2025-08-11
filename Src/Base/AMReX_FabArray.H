@@ -537,55 +537,117 @@ public:
     FAB const* fabPtr (int K) const noexcept;
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    void prefetchToHost (const MFIter& mfi) const noexcept;
+    void prefetchToHost (const MFIter& mfi) const noexcept
+    {
+#ifdef AMREX_USE_CUDA
+        this->fabPtr(mfi)->prefetchToHost();
+#else
+        amrex::ignore_unused(mfi);
+#endif
+    }
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    void prefetchToDevice (const MFIter& mfi) const noexcept;
+    void prefetchToDevice (const MFIter& mfi) const noexcept
+    {
+#ifdef AMREX_USE_CUDA
+        this->fabPtr(mfi)->prefetchToDevice();
+#else
+        amrex::ignore_unused(mfi);
+#endif
+    }
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type const> array (const MFIter& mfi) const noexcept;
-    //
-    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type> array (const MFIter& mfi) noexcept;
-    //
-    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type const> array (int K) const noexcept;
-    //
-    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type> array (int K) noexcept;
+    Array4<typename FabArray<FAB>::value_type const> array (const MFIter& mfi) const noexcept
+    {
+        return fabPtr(mfi)->const_array();
+    }
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type const> const_array (const MFIter& mfi) const noexcept;
-    //
-    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type const> const_array (int K) const noexcept;
+    Array4<typename FabArray<FAB>::value_type> array (const MFIter& mfi) noexcept
+    {
+        return fabPtr(mfi)->array();
+    }
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type const> array (const MFIter& mfi, int start_comp) const noexcept;
-    //
-    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type> array (const MFIter& mfi, int start_comp) noexcept;
-    //
-    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type const> array (int K, int start_comp) const noexcept;
-    //
-    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type> array (int K, int start_comp) noexcept;
+    Array4<typename FabArray<FAB>::value_type const> array (int K) const noexcept
+    {
+        return fabPtr(K)->const_array();
+    }
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type const> const_array (const MFIter& mfi, int start_comp) const noexcept;
-    //
-    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    Array4<typename FabArray<FAB>::value_type const> const_array (int K, int start_comp) const noexcept;
+    Array4<typename FabArray<FAB>::value_type> array (int K) noexcept
+    {
+        return fabPtr(K)->array();
+    }
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    MultiArray4<typename FabArray<FAB>::value_type> arrays () noexcept;
+    Array4<typename FabArray<FAB>::value_type const> const_array (const MFIter& mfi) const noexcept
+    {
+        return fabPtr(mfi)->const_array();
+    }
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    MultiArray4<typename FabArray<FAB>::value_type const> arrays () const noexcept;
+    Array4<typename FabArray<FAB>::value_type const> const_array (int K) const noexcept
+    {
+        return fabPtr(K)->const_array();
+    }
 
     template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
-    MultiArray4<typename FabArray<FAB>::value_type const> const_arrays () const noexcept;
+    Array4<typename FabArray<FAB>::value_type const> array (const MFIter& mfi, int start_comp) const noexcept
+    {
+        return fabPtr(mfi)->const_array(start_comp);
+    }
+
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    Array4<typename FabArray<FAB>::value_type> array (const MFIter& mfi, int start_comp) noexcept
+    {
+        return fabPtr(mfi)->array(start_comp);
+    }
+
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    Array4<typename FabArray<FAB>::value_type const> array (int K, int start_comp) const noexcept
+    {
+        return fabPtr(K)->const_array(start_comp);
+    }
+
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    Array4<typename FabArray<FAB>::value_type> array (int K, int start_comp) noexcept
+    {
+        return fabPtr(K)->array(start_comp);
+    }
+
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    Array4<typename FabArray<FAB>::value_type const> const_array (const MFIter& mfi, int start_comp) const noexcept
+    {
+        return fabPtr(mfi)->const_array(start_comp);
+    }
+
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    Array4<typename FabArray<FAB>::value_type const> const_array (int K, int start_comp) const noexcept
+    {
+        return fabPtr(K)->const_array(start_comp);
+    }
+
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    MultiArray4<typename FabArray<FAB>::value_type> arrays () noexcept
+    {
+        build_arrays();
+        return m_arrays;
+    }
+
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    MultiArray4<typename FabArray<FAB>::value_type const> arrays () const noexcept
+    {
+        build_arrays();
+        return m_const_arrays;
+    }
+
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    MultiArray4<typename FabArray<FAB>::value_type const> const_arrays () const noexcept
+    {
+        build_arrays();
+        return m_const_arrays;
+    }
 
     //! Explicitly set the Kth FAB in the FabArray to point to elem.
     void setFab (int boxno, std::unique_ptr<FAB> elem);
@@ -918,6 +980,18 @@ public:
                               const FabArrayBase::CPC* a_cpc = nullptr,
                               bool                 to_ghost_cells_only = false);
 
+    void ParallelCopy_nowait (const FabArray<FAB>& src,
+                              int                  scomp,
+                              int                  dcomp,
+                              int                  ncomp,
+                              const IntVect&       snghost,
+                              const IntVect&       dnghost,
+                              const IntVect&       offset,
+                              const Periodicity&   period = Periodicity::NonPeriodic(),
+                              CpOp                 op = FabArrayBase::COPY,
+                              const FabArrayBase::CPC* a_cpc = nullptr,
+                              bool                 to_ghost_cells_only = false);
+
     void ParallelCopy_finish ();
 
     void ParallelCopyToGhost (const FabArray<FAB>& src,
@@ -937,6 +1011,38 @@ public:
                                      const Periodicity&   period = Periodicity::NonPeriodic());
 
     void ParallelCopyToGhost_finish();
+
+    /**
+     * \brief This function copies data from src to this FabArray.
+     *
+     * \param src       source FabArray
+     * \param src_comp  starting component of source involved in this function
+     * \param dest_comp starting component of this FabArray involved in this function
+     * \param num_comp  number of components involved in this function
+     * \param snghost   number of source ghost cells involved in this function
+     * \param dnghost   number of destination ghost cells involved in this function
+     * \param offset    index shift. dest(iv,dest_comp+n) = src(iv-offset,src_comp+n)
+     * \param period    periodicity of the data
+     */
+    void ParallelCopy (const FabArray<FAB>& src, int src_comp, int dest_comp, int num_comp,
+                       const IntVect& snghost, const IntVect& dnghost,
+                       const IntVect& offset, const Periodicity& period);
+
+    /**
+     * \brief This function adds data from src to this FabArray.
+     *
+     * \param src       source FabArray
+     * \param src_comp  starting component of source involved in this function
+     * \param dest_comp starting component of this FabArray involved in this function
+     * \param num_comp  number of components involved in this function
+     * \param snghost   number of source ghost cells involved in this function
+     * \param dnghost   number of destination ghost cells involved in this function
+     * \param offset    index shift. dest(iv,dest_comp+n) = src(iv-offset,src_comp+n)
+     * \param period    periodicity of the data
+     */
+    void ParallelAdd (const FabArray<FAB>& src, int src_comp, int dest_comp, int num_comp,
+                      const IntVect& snghost, const IntVect& dnghost,
+                      const IntVect& offset, const Periodicity& period);
 
     [[deprecated("Use FabArray::ParallelCopy() instead.")]]
     void copy (const FabArray<FAB>& src,
@@ -1173,6 +1279,9 @@ public:
 
 #ifdef AMREX_USE_GPU
 
+    TagVector<Array4CopyTag<value_type>> const*
+    FB_get_local_copy_tag_vector (const FB& TheFB);
+
     void FB_local_copy_gpu (const FB& TheFB, int scomp, int ncomp);
     void PC_local_gpu (const CPC& thecpc, FabArray<FAB> const& src,
                        int scomp, int dcomp, int ncomp, CpOp op);
@@ -1210,14 +1319,30 @@ public:
     static void pack_send_buffer_gpu (FabArray<FAB> const& src, int scomp, int ncomp,
                                       Vector<char*> const& send_data,
                                       Vector<std::size_t> const& send_size,
-                                      Vector<const CopyComTagsContainer*> const& send_cctc);
+                                      Vector<const CopyComTagsContainer*> const& send_cctc,
+                                      std::uint64_t id);
 
     template <typename BUF = value_type>
     static void unpack_recv_buffer_gpu (FabArray<FAB>& dst, int dcomp, int ncomp,
                                         Vector<char*> const& recv_data,
                                         Vector<std::size_t> const& recv_size,
                                         Vector<const CopyComTagsContainer*> const& recv_cctc,
-                                        CpOp op, bool is_thread_safe);
+                                        CpOp op, bool is_thread_safe,
+                                        std::uint64_t id);
+
+    template <typename BUF>
+    TagVector<CommRecvBufTag<value_type>> const*
+    get_recv_copy_tag_vector (Vector<char*> const& recv_data,
+                              Vector<std::size_t> const& recv_size,
+                              Vector<CopyComTagsContainer const*> const& recv_cctc,
+                              int ncomp, std::uint64_t id);
+
+    template <typename BUF>
+    TagVector<CommSendBufTag<value_type>> const*
+    get_send_copy_tag_vector (Vector<char*> const& send_data,
+                              Vector<std::size_t> const& send_size,
+                              Vector<CopyComTagsContainer const*> const& send_cctc,
+                              int ncomp, std::uint64_t id) const;
 
 #endif
 
@@ -1353,6 +1478,20 @@ private:
 
     void clear_arrays ();
 
+#ifdef AMREX_USE_GPU
+    std::map<std::uint64_t,
+             std::unique_ptr<TagVector<Array4CopyTag<value_type>>>>
+        m_fb_local_copy_handler;
+
+    using RecvSendCopyHandlerKey = std::tuple<std::uint64_t,std::size_t,int>;
+    std::map<RecvSendCopyHandlerKey,
+             std::unique_ptr<TagVector<CommRecvBufTag<value_type>>>>
+        m_recv_copy_handler;
+    mutable std::map<RecvSendCopyHandlerKey,
+                     std::unique_ptr<TagVector<CommSendBufTag<value_type>>>>
+        m_send_copy_handler;
+#endif
+
 public:
 
 #ifdef BL_USE_MPI
@@ -1462,6 +1601,61 @@ public:
                          value_type a, const FabArray<FAB>& x, int xcomp,
                          value_type b, const FabArray<FAB>& y, int ycomp,
                          int dstcomp, int numcomp, const IntVect& nghost);
+
+    /**
+     * \brief y = x2+a2*(y+a1*x1)
+     *
+     * \param y      FabArray y
+     * \param a1     scalar a1
+     * \param x1     FabArray x1
+     * \param a2     scalar a2
+     * \param x2     FabArray x2
+     * \param xcomp  starting component of x
+     * \param ycomp  starting component of y
+     * \param ncomp  number of components
+     * \param nghost number of ghost cells
+     */
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    static void Saxpy_Xpay (FabArray<FAB>& y, value_type a1, FabArray<FAB> const& x1,
+                            value_type a2, FabArray<FAB> const& x2,
+                            int xcomp, int ycomp, int ncomp, IntVect const& nghost);
+
+    /**
+     * \brief y1 += a1*x1; y2 += a2*x2;
+     *
+     * \param y1     FabArray y1
+     * \param a1     scalar a1
+     * \param x1     FabArray x1
+     * \param y2     FabArray y2
+     * \param a2     scalar a2
+     * \param x2     FabArray x2
+     * \param xcomp  starting component of x1, x2
+     * \param ycomp  starting component of y1, y2
+     * \param ncomp  number of components
+     * \param nghost number of ghost cells
+     */
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    static void Saxpy_Saxpy (FabArray<FAB>& y1, value_type a1, FabArray<FAB> const& x1,
+                             FabArray<FAB>& y2, value_type a2, FabArray<FAB> const& x2,
+                             int xcomp, int ycomp, int ncomp, IntVect const& nghost);
+
+    /**
+     * \brief y1 += a1*y2; y2 += a2*x;
+     *
+     * \param y1     FabArray y1
+     * \param a1     scalar a1
+     * \param y2     FabArray y2
+     * \param a2     scalar a2
+     * \param x      FabArray x
+     * \param xcomp  starting component of x
+     * \param ycomp  starting component of y1, y2
+     * \param ncomp  number of components
+     * \param nghost number of ghost cells
+     */
+    template <class F=FAB, std::enable_if_t<IsBaseFab<F>::value,int> = 0>
+    static void Saypy_Saxpy (FabArray<FAB>& y1, value_type a1,
+                             FabArray<FAB>& y2, value_type a2, FabArray<FAB> const& x,
+                             int xcomp, int ycomp, int ncomp, IntVect const& nghost);
 };
 
 
@@ -1534,153 +1728,6 @@ FabArray<FAB>::fabPtr (int K) const noexcept
 template <class FAB>
 template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
 void
-FabArray<FAB>::prefetchToHost (const MFIter& mfi) const noexcept
-{
-#ifdef AMREX_USE_CUDA
-    this->fabPtr(mfi)->prefetchToHost();
-#else
-    amrex::ignore_unused(mfi);
-#endif
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-void
-FabArray<FAB>::prefetchToDevice (const MFIter& mfi) const noexcept
-{
-#ifdef AMREX_USE_CUDA
-    this->fabPtr(mfi)->prefetchToDevice();
-#else
-    amrex::ignore_unused(mfi);
-#endif
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::array (const MFIter& mfi) const noexcept
-{
-    return fabPtr(mfi)->const_array();
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type>
-FabArray<FAB>::array (const MFIter& mfi) noexcept
-{
-    return fabPtr(mfi)->array();
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::array (int K) const noexcept
-{
-    return fabPtr(K)->const_array();
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type>
-FabArray<FAB>::array (int K) noexcept
-{
-    return fabPtr(K)->array();
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::const_array (const MFIter& mfi) const noexcept
-{
-    return fabPtr(mfi)->const_array();
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::const_array (int K) const noexcept
-{
-    return fabPtr(K)->const_array();
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::array (const MFIter& mfi, int start_comp) const noexcept
-{
-    return fabPtr(mfi)->const_array(start_comp);
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type>
-FabArray<FAB>::array (const MFIter& mfi, int start_comp) noexcept
-{
-    return fabPtr(mfi)->array(start_comp);
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::array (int K, int start_comp) const noexcept
-{
-    return fabPtr(K)->const_array(start_comp);
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type>
-FabArray<FAB>::array (int K, int start_comp) noexcept
-{
-    return fabPtr(K)->array(start_comp);
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::const_array (const MFIter& mfi, int start_comp) const noexcept
-{
-    return fabPtr(mfi)->const_array(start_comp);
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-Array4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::const_array (int K, int start_comp) const noexcept
-{
-    return fabPtr(K)->const_array(start_comp);
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-MultiArray4<typename FabArray<FAB>::value_type>
-FabArray<FAB>::arrays () noexcept
-{
-    build_arrays();
-    return m_arrays;
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-MultiArray4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::arrays () const noexcept
-{
-    build_arrays();
-    return m_const_arrays;
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-MultiArray4<typename FabArray<FAB>::value_type const>
-FabArray<FAB>::const_arrays () const noexcept
-{
-    build_arrays();
-    return m_const_arrays;
-}
-
-template <class FAB>
-template <class F, std::enable_if_t<IsBaseFab<F>::value,int>>
-void
 FabArray<FAB>::build_arrays () const
 {
     using A = Array4<value_type>;
@@ -1708,7 +1755,10 @@ FabArray<FAB>::build_arrays () const
 #ifdef AMREX_USE_GPU
         m_arrays.dp = (A*)m_dp_arrays;
         m_const_arrays.dp = (AC*)m_dp_arrays + n;
-        Gpu::htod_memcpy(m_dp_arrays, m_hp_arrays, n*2*sizeof(A));
+        Gpu::htod_memcpy_async(m_dp_arrays, m_hp_arrays, n*2*sizeof(A));
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
 #endif
     }
 }
@@ -1804,6 +1854,12 @@ FabArray<FAB>::clear ()
     m_single_chunk_size = 0;
 
     m_tags.clear();
+
+#ifdef AMREX_USE_GPU
+    m_fb_local_copy_handler.clear();
+    m_recv_copy_handler.clear();
+    m_send_copy_handler.clear();
+#endif
 
     FabArrayBase::clear();
 }
@@ -1940,11 +1996,16 @@ FabArray<FAB>::FabArray (FabArray<FAB>&& rhs) noexcept
     , m_const_arrays(rhs.m_const_arrays)
     , m_tags       (std::move(rhs.m_tags))
     , shmem        (std::move(rhs.shmem))
+#ifdef AMREX_USE_GPU
+    , m_fb_local_copy_handler(std::move(rhs.m_fb_local_copy_handler))
+    , m_recv_copy_handler(std::move(rhs.m_recv_copy_handler))
+    , m_send_copy_handler(std::move(rhs.m_send_copy_handler))
+#endif
     // no need to worry about the data used in non-blocking FillBoundary.
 {
     m_FA_stats.recordBuild();
     rhs.define_function_called = false; // the responsibility of clear BD has been transferred.
-    rhs.m_fabs_v.clear(); // clear the data pointers so that rhs.clear does delete them.
+    rhs.m_fabs_v.clear(); // clear the data pointers so that rhs.clear does not delete them.
     rhs.clear();
 }
 
@@ -1971,6 +2032,11 @@ FabArray<FAB>::operator= (FabArray<FAB>&& rhs) noexcept
         m_const_arrays = rhs.m_const_arrays;
         std::swap(m_tags, rhs.m_tags);
         shmem = std::move(rhs.shmem);
+#ifdef AMREX_USE_GPU
+        std::swap(m_fb_local_copy_handler, rhs.m_fb_local_copy_handler);
+        std::swap(m_recv_copy_handler, rhs.m_recv_copy_handler);
+        std::swap(m_send_copy_handler, rhs.m_send_copy_handler);
+#endif
 
         rhs.define_function_called = false;
         rhs.m_fabs_v.clear();
@@ -2999,6 +3065,175 @@ FabArray<FAB>::Xpay (FabArray<FAB>& y, value_type a, FabArray<FAB> const& x,
                 yFab(i,j,k,n+ycomp) = xFab(i,j,k,n+xcomp)
                     +             a * yFab(i,j,k,n+ycomp);
             });
+        }
+    }
+}
+
+template <class FAB>
+template <class F, std::enable_if_t<IsBaseFab<F>::value,int> FOO>
+void FabArray<FAB>::Saxpy_Xpay (FabArray<FAB>& y, value_type a1, FabArray<FAB> const& x1,
+                                value_type a2, FabArray<FAB> const& x2,
+                                int xcomp, int ycomp, int ncomp, IntVect const& nghost)
+{
+    AMREX_ASSERT(y.boxArray() == x1.boxArray() &&
+                 y.boxArray() == x2.boxArray() &&
+                 y.distributionMap == x1.distributionMap &&
+                 y.distributionMap == x2.distributionMap &&
+                 y.nGrowVect().allGE(nghost) &&
+                 x1.nGrowVect().allGE(nghost) &&
+                 x2.nGrowVect().allGE(nghost));
+
+    BL_PROFILE("FabArray::Saxpy_Xpay()");
+
+#ifdef AMREX_USE_GPU
+    if (Gpu::inLaunchRegion() && y.isFusingCandidate()) {
+        auto const& yma = y.arrays();
+        auto const& xma1 = x1.const_arrays();
+        auto const& xma2 = x2.const_arrays();
+        ParallelFor(y, nghost, ncomp,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
+        {
+            yma[box_no](i,j,k,ycomp+n) = xma2[box_no](i,j,k,xcomp+n)
+                                 + a2 * (yma [box_no](i,j,k,ycomp+n)
+                                  + a1 * xma1[box_no](i,j,k,xcomp+n));
+        });
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
+    } else
+#endif
+    {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(y,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const Box& bx = mfi.growntilebox(nghost);
+
+            if (bx.ok()) {
+                auto const& xfab1 = x1.const_array(mfi);
+                auto const& xfab2 = x2.const_array(mfi);
+                auto const& yfab = y.array(mfi);
+                AMREX_HOST_DEVICE_PARALLEL_FOR_4D( bx, ncomp, i, j, k, n,
+                {
+                    yfab(i,j,k,ycomp+n) = xfab2(i,j,k,xcomp+n)
+                                  + a2 * (yfab (i,j,k,ycomp+n)
+                                   + a1 * xfab1(i,j,k,xcomp+n));
+                });
+            }
+        }
+    }
+}
+
+template <class FAB>
+template <class F, std::enable_if_t<IsBaseFab<F>::value,int> FOO>
+void FabArray<FAB>::Saxpy_Saxpy (FabArray<FAB>& y1, value_type a1, FabArray<FAB> const& x1,
+                                 FabArray<FAB>& y2, value_type a2, FabArray<FAB> const& x2,
+                                 int xcomp, int ycomp, int ncomp, IntVect const& nghost)
+{
+    AMREX_ASSERT(y1.boxArray() == y2.boxArray() &&
+                 y1.boxArray() == x1.boxArray() &&
+                 y1.boxArray() == x2.boxArray() &&
+                 y1.distributionMap == y2.distributionMap &&
+                 y1.distributionMap == x1.distributionMap &&
+                 y1.distributionMap == x2.distributionMap &&
+                 y1.nGrowVect().allGE(nghost) &&
+                 y2.nGrowVect().allGE(nghost) &&
+                 x1.nGrowVect().allGE(nghost) &&
+                 x2.nGrowVect().allGE(nghost));
+
+    BL_PROFILE("FabArray::Saxpy_Saxpy()");
+
+#ifdef AMREX_USE_GPU
+    if (Gpu::inLaunchRegion() && y1.isFusingCandidate()) {
+        auto const& y1ma = y1.arrays();
+        auto const& x1ma = x1.const_arrays();
+        auto const& y2ma = y2.arrays();
+        auto const& x2ma = x2.const_arrays();
+        ParallelFor(y1, nghost, ncomp,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
+        {
+            y1ma[box_no](i,j,k,ycomp+n) += a1 * x1ma[box_no](i,j,k,xcomp+n);
+            y2ma[box_no](i,j,k,ycomp+n) += a2 * x2ma[box_no](i,j,k,xcomp+n);
+        });
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
+    } else
+#endif
+    {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(y1,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const Box& bx = mfi.growntilebox(nghost);
+
+            if (bx.ok()) {
+                auto const& x1fab = x1.const_array(mfi);
+                auto const& y1fab = y1.array(mfi);
+                auto const& x2fab = x2.const_array(mfi);
+                auto const& y2fab = y2.array(mfi);
+                AMREX_HOST_DEVICE_PARALLEL_FOR_4D( bx, ncomp, i, j, k, n,
+                {
+                    y1fab(i,j,k,ycomp+n) += a1 * x1fab(i,j,k,xcomp+n);
+                    y2fab(i,j,k,ycomp+n) += a2 * x2fab(i,j,k,xcomp+n);
+                });
+            }
+        }
+    }
+}
+
+template <class FAB>
+template <class F, std::enable_if_t<IsBaseFab<F>::value,int> FOO>
+void FabArray<FAB>::Saypy_Saxpy (FabArray<FAB>& y1, value_type a1,
+                                 FabArray<FAB>& y2, value_type a2, FabArray<FAB> const& x,
+                                 int xcomp, int ycomp, int ncomp, IntVect const& nghost)
+{
+    AMREX_ASSERT(y1.boxArray() == y2.boxArray() &&
+                 y1.boxArray() ==  x.boxArray() &&
+                 y1.distributionMap == y2.distributionMap &&
+                 y1.distributionMap ==  x.distributionMap &&
+                 y1.nGrowVect().allGE(nghost) &&
+                 y2.nGrowVect().allGE(nghost) &&
+                  x.nGrowVect().allGE(nghost));
+
+    BL_PROFILE("FabArray::Saypy_Saxpy()");
+
+#ifdef AMREX_USE_GPU
+    if (Gpu::inLaunchRegion() && y1.isFusingCandidate()) {
+        auto const& y1ma = y1.arrays();
+        auto const& y2ma = y2.arrays();
+        auto const&  xma = x.const_arrays();
+        ParallelFor(y1, nghost, ncomp,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
+        {
+            y1ma[box_no](i,j,k,ycomp+n) += a1 * y2ma[box_no](i,j,k,ycomp+n);
+            y2ma[box_no](i,j,k,ycomp+n) += a2 *  xma[box_no](i,j,k,xcomp+n);
+        });
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
+    } else
+#endif
+    {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(y1,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const Box& bx = mfi.growntilebox(nghost);
+
+            if (bx.ok()) {
+                auto const&  xfab = x.const_array(mfi);
+                auto const& y1fab = y1.array(mfi);
+                auto const& y2fab = y2.array(mfi);
+                AMREX_HOST_DEVICE_PARALLEL_FOR_4D( bx, ncomp, i, j, k, n,
+                {
+                    y1fab(i,j,k,ycomp+n) += a1 * y2fab(i,j,k,ycomp+n);
+                    y2fab(i,j,k,ycomp+n) += a2 *  xfab(i,j,k,xcomp+n);
+                });
+            }
         }
     }
 }

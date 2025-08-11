@@ -225,61 +225,8 @@ MultiFab::Swap (MultiFab& dst, MultiFab& src,
     BL_ASSERT(dst.nGrowVect().allGE(nghost) && src.nGrowVect().allGE(nghost));
 
     BL_PROFILE("MultiFab::Swap()");
-
-    // We can take a shortcut and do a std::swap if we're swapping all of the data
-    // and they are allocated in the same Arena.
-
-    bool explicit_swap = true;
-
-    if (srccomp == dstcomp && dstcomp == 0 && src.nComp() == dst.nComp() &&
-        src.nGrowVect() == nghost && src.nGrowVect() == dst.nGrowVect() &&
-        src.arena() == dst.arena() && src.hasEBFabFactory() == dst.hasEBFabFactory()) {
-        explicit_swap = false;
-    }
-
-    if (!explicit_swap) {
-
-        std::swap(dst, src);
-
-    } else {
-#ifdef AMREX_USE_GPU
-        if (Gpu::inLaunchRegion() && dst.isFusingCandidate()) {
-            auto const& dstma = dst.arrays();
-            auto const& srcma = src.arrays();
-            ParallelFor(dst, nghost, numcomp,
-            [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
-            {
-                const amrex::Real tmp = dstma[box_no](i,j,k,n+dstcomp);
-                dstma[box_no](i,j,k,n+dstcomp) = srcma[box_no](i,j,k,n+srccomp);
-                srcma[box_no](i,j,k,n+srccomp) = tmp;
-            });
-            if (!Gpu::inNoSyncRegion()) {
-                Gpu::streamSynchronize();
-            }
-        } else
-#endif
-        {
-#ifdef AMREX_USE_OMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-            for (MFIter mfi(dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box& bx = mfi.growntilebox(nghost);
-                if (bx.ok()) {
-                    auto sfab = src.array(mfi);
-                    auto dfab = dst.array(mfi);
-                    AMREX_HOST_DEVICE_PARALLEL_FOR_4D( bx, numcomp, i, j, k, n,
-                    {
-                        const amrex::Real tmp = dfab(i,j,k,n+dstcomp);
-                        dfab(i,j,k,n+dstcomp) = sfab(i,j,k,n+srccomp);
-                        sfab(i,j,k,n+srccomp) = tmp;
-                    });
-                }
-            }
-        }
-    }
+    amrex::Swap(dst,src,srccomp,dstcomp,numcomp,nghost);
 }
-
 
 void
 MultiFab::Subtract (MultiFab& dst, const MultiFab& src,
@@ -628,7 +575,11 @@ MultiFab::is_finite (int scomp, int ncomp, const IntVect& ngrow, bool local) con
         r = ParReduce(TypeList<ReduceOpLogicalOr>{}, TypeList<bool>{}, *this, ngrow, ncomp,
         [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept -> GpuTuple<bool>
         {
+#if defined(_WIN32)
+            return Gpu::isnan(ma[box_no](i,j,k,n+scomp)) || Gpu::isinf(ma[box_no](i,j,k,n+scomp));
+#else
             return !amrex::Math::isfinite(ma[box_no](i,j,k,n+scomp));
+#endif
         });
     } else
 #endif
@@ -1121,6 +1072,16 @@ MultiFab::norm2 (int comp) const
 }
 
 Real
+MultiFab::norm2 (int comp, int numcomp) const
+{
+    BL_ASSERT(ixType().cellCentered());
+
+    Real nm2 = MultiFab::Dot(*this, comp, numcomp, 0);
+    nm2 = std::sqrt(nm2);
+    return nm2;
+}
+
+Real
 MultiFab::norm2 (int comp, const Periodicity& period) const
 {
     BL_PROFILE("MultiFab::norm2(period)");
@@ -1568,8 +1529,8 @@ MultiFab::OverlapMask (const Periodicity& period) const
     amrex::ParallelFor(tags, 1,
     [=] AMREX_GPU_DEVICE (int i, int j, int k, int n, Array4BoxTag<Real> const& tag) noexcept
     {
-        Real* p = tag.dfab.ptr(i,j,k,n);
-        Gpu::Atomic::AddNoRet(p, Real(1.0));
+        Real* ptr = tag.dfab.ptr(i,j,k,n);
+        Gpu::Atomic::AddNoRet(ptr, Real(1.0));
     });
 #endif
 

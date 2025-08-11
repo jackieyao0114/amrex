@@ -37,6 +37,7 @@ namespace amrex
 
     struct RandomEngine {
         sycl_rng_engine* engine;
+        AMREX_GPU_HOST_DEVICE RandomEngine (sycl_rng_engine* e) : engine(e) {}
     };
 
 #else
@@ -56,6 +57,7 @@ namespace amrex
 
     struct RandomEngine {
         randState_t* rand_state;
+        AMREX_GPU_HOST_DEVICE RandomEngine (randState_t* rs) : rand_state(rs) {}
     };
 
 #endif
@@ -65,6 +67,15 @@ namespace amrex
     struct RandomEngine {}; // CPU
 
 #endif
+
+    AMREX_FORCE_INLINE
+    RandomEngine getInvalidRandomEngine () {
+#ifdef AMREX_USE_GPU
+        return RandomEngine{nullptr};
+#else
+        return RandomEngine{};
+#endif
+    }
 
 }
 

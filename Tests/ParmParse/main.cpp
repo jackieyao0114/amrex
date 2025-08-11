@@ -8,12 +8,25 @@ using namespace amrex;
 
 int main(int argc, char* argv[])
 {
+#if !defined(_WIN32)
+    if (! std::getenv("AMREX_DEFAULT_INIT")) {
+        setenv("AMREX_DEFAULT_INIT",
+               R"(amrex.envfoo=0 amrex.envbar=1 amrex.envabc=1 2 3 amrex.envstr="a b c")", 1);
+    }
+#endif
+
     amrex::Initialize(argc,argv);
     {
         ParmParse::SetParserPrefix("physical_constants");
         ParmParse pp("physical_constants");
         pp.add("c", 299792458.);
         pp.add("pi", 3.14159265358979323846);
+    }
+    {
+        ParmParse pp;
+        int val;
+        pp.query("dAx_x/dx(x,y,t,zeval)", val);
+        AMREX_ALWAYS_ASSERT(val == 12);
     }
     {
         ParmParse pp;
@@ -135,6 +148,54 @@ int main(int argc, char* argv[])
         std::optional<int> o_do_that;
         pp.queryAsDouble("do_that", o_do_that);
         AMREX_ALWAYS_ASSERT(!o_do_that.has_value());
+    }
+    {
+        ParmParse pp;
+        bool my_bool_flag_1 = false;
+        bool my_bool_flag_2 = false;
+        pp.queryAddWithParser("my_bool_flag", my_bool_flag_1);
+        pp.query("my_bool_flag", my_bool_flag_2);
+        AMREX_ALWAYS_ASSERT(my_bool_flag_1 && my_bool_flag_2);
+    }
+    {
+        ParmParse pp;
+        std::string line;
+        pp.queryline("my_string_line", line);
+        AMREX_ALWAYS_ASSERT(line == "a b c");
+        line.clear();
+        pp.getline("my_string_line", line);
+        AMREX_ALWAYS_ASSERT(line == "a b c");
+    }
+#if !defined(_WIN32)
+    {
+        int envfoo, envbar;
+        std::vector<int> envabc;
+        std::string envstr;
+        ParmParse pp("amrex");
+        pp.get("envfoo", envfoo);
+        pp.get("envbar", envbar);
+        pp.getarr("envabc", envabc);
+        pp.get("envstr", envstr);
+        AMREX_ALWAYS_ASSERT(envfoo == 0 && envbar == 1 &&
+                            envabc.size() == 3 &&
+                            envabc[0] == 1 && envabc[1] == 2 && envabc[2] == 3 &&
+                            envstr == "a b c");
+    }
+#endif
+    {
+        ParmParse pp("t");
+        std::vector<std::vector<double>> table;
+        pp.querytable("table", table);
+        std::vector<std::vector<int>> table2;
+        pp.gettable("table2", table2);
+        AMREX_ALWAYS_ASSERT(table.size() == 4 && table2.size() == 4);
+        for (int irow = 0; irow < 4; ++irow) {
+            AMREX_ALWAYS_ASSERT(table[irow].size() == 3 && table2[irow].size() == 3);
+            for (int icol = 0; icol < 3; ++icol) {
+                AMREX_ALWAYS_ASSERT(table [irow][icol] == (irow+1)*10.+icol+1 &&
+                                    table2[irow][icol] == (irow+1)*10 +icol+1);
+            }
+        }
     }
     {
         amrex::Print() << "SUCCESS\n";

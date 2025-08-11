@@ -32,6 +32,7 @@ enum iparser_f2_t {  // Built-in functions with two arguments
     IPARSER_LEQ,
     IPARSER_EQ,
     IPARSER_NEQ,
+    IPARSER_CMP_CHAIN,
     IPARSER_AND,
     IPARSER_OR,
     IPARSER_MIN,
@@ -143,6 +144,8 @@ struct iparser_node* iparser_newf3 (enum iparser_f3_t ftype, struct iparser_node
                                     struct iparser_node* n2, struct iparser_node* n3);
 struct iparser_node* iparser_newassign (struct iparser_symbol* s, struct iparser_node* v);
 struct iparser_node* iparser_newlist (struct iparser_node* nl, struct iparser_node* nr);
+struct iparser_node* iparser_newcmpchain (struct iparser_node* nl, enum iparser_f2_t cmp,
+                                          struct iparser_node* nr);
 
 /*******************************************************************/
 
@@ -159,9 +162,9 @@ struct amrex_iparser {
 
 struct amrex_iparser* amrex_iparser_new ();
 void amrex_iparser_delete (struct amrex_iparser* iparser);
+void amrex_iparser_delete_ptrs ();
 
-struct amrex_iparser* iparser_dup (struct amrex_iparser* source);
-struct iparser_node* iparser_ast_dup (struct amrex_iparser* iparser, struct iparser_node* node, int move);
+struct iparser_node* iparser_ast_dup (struct amrex_iparser* iparser, struct iparser_node* node);
 
 void iparser_regvar (struct amrex_iparser* iparser, char const* name, int i);
 void iparser_setconst (struct amrex_iparser* iparser, char const* name, long long c);
@@ -229,6 +232,7 @@ iparser_call_f2 (enum iparser_f2_t type, long long a, long long b)
         return (a == b) ? 1 : 0;
     case IPARSER_NEQ:
         return (a != b) ? 1 : 0;
+    case IPARSER_CMP_CHAIN:
     case IPARSER_AND:
         return ((a != 0) && (b != 0)) ? 1 : 0;
     case IPARSER_OR:

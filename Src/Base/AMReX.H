@@ -11,6 +11,7 @@
 #include <AMReX_Extension.H>
 
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -80,12 +81,31 @@ namespace amrex
                        ErrorHandler a_errhandler = nullptr);
 
     // The returned AMReX* is non-owning! To delete it, call Finalize(AMReX*).
+    AMReX* Initialize (int& argc, char**& argv,
+                       const std::function<void()>& func_parm_parse,
+                       std::ostream& a_osout = std::cout,
+                       std::ostream& a_oserr = std::cerr,
+                       ErrorHandler a_errhandler = nullptr);
+
+    // The returned AMReX* is non-owning! To delete it, call Finalize(AMReX*).
     AMReX* Initialize (int& argc, char**& argv, bool build_parm_parse=true,
                        MPI_Comm mpi_comm = MPI_COMM_WORLD,
                        const std::function<void()>& func_parm_parse = {},
                        std::ostream& a_osout = std::cout,
                        std::ostream& a_oserr = std::cerr,
                        ErrorHandler a_errhandler = nullptr);
+
+    // \brief Minimal version of initialization.
+    //
+    // This version is intended for users who only need AMReX for some
+    // specific functionalities such as FFT. It's the user's responsibility
+    // to initialize MPI. For multiple-GPU systems, it's the user's
+    // responsibility to properly set the GPU devices to be used. We will not
+    // try to pre-allocate memory arenas. We will not install a signal
+    // handler. Functionalities like random number generator and async I/O
+    // will be work. However, functionalities like FFT and linear solvers do
+    // work.
+    void Init_minimal (MPI_Comm mpi_comm = MPI_COMM_WORLD);
 
     /**
        \brief Returns true if there are any currently-active and initialized
@@ -96,6 +116,10 @@ namespace amrex
 
     void Finalize (AMReX* pamrex);
     void Finalize (); // Finalize the current top
+    // For initialization with Init_minimal, Finalize_minimal should be used
+    // for finalization.
+    void Finalize_minimal();
+
     /**
     * \brief We maintain a stack of functions that need to be called in Finalize().
     * The functions are called in LIFO order.  The idea here is to allow
@@ -165,25 +189,40 @@ namespace amrex
     * in <AMReX_BLassert.H>.
     */
 
-    void Assert_host (const char* EX, const char* file, int line, const char* msg);
+    void Assert_host (const char* EX, const char* file, int line, const char* msg,
+                      std::size_t msg_size=0);
 
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-    void Assert (const char* EX, const char* file, int line, const char* msg = nullptr) {
-#if defined(NDEBUG)
+    void Assert (const char* EX, const char* file, int line) {
+#if defined(NDEBUG) && !defined(AMREX_USE_ASSERTION)
+        AMREX_IF_ON_DEVICE((amrex::ignore_unused(EX,file,line);))
+#else
+        AMREX_IF_ON_DEVICE((
+            AMREX_DEVICE_PRINTF("Assertion `%s' failed, file \"%s\", line %d",
+                                    EX, file, line);
+            AMREX_DEVICE_ASSERT(0);
+        ))
+#endif
+        AMREX_IF_ON_HOST((Assert_host(EX,file,line,nullptr,0U);))
+    }
+
+    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+    void Assert (const char* EX, const char* file, int line, const char* msg) {
+#if defined(NDEBUG) && !defined(AMREX_USE_ASSERTION)
         AMREX_IF_ON_DEVICE((amrex::ignore_unused(EX,file,line,msg);))
 #else
         AMREX_IF_ON_DEVICE((
-                if (msg) {
-                AMREX_DEVICE_PRINTF("Assertion `%s' failed, file \"%s\", line %d, Msg: %s",
-                                        EX, file, line, msg);
-                } else {
-                AMREX_DEVICE_PRINTF("Assertion `%s' failed, file \"%s\", line %d",
-                                        EX, file, line);
-                }
-                AMREX_DEVICE_ASSERT(0);
+            AMREX_DEVICE_PRINTF("Assertion `%s' failed, file \"%s\", line %d, Msg: %s",
+                                    EX, file, line, msg);
+            AMREX_DEVICE_ASSERT(0);
         ))
 #endif
-        AMREX_IF_ON_HOST((Assert_host(EX,file,line,msg);))
+        AMREX_IF_ON_HOST((Assert_host(EX,file,line,msg,std::strlen(msg));))
+    }
+
+    AMREX_FORCE_INLINE
+    void Assert (const char* EX, const char* file, int line, const std::string& msg) {
+        Assert_host(EX,file,line,msg.c_str(),msg.size());
     }
 
     /**

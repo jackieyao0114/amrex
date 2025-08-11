@@ -74,7 +74,7 @@ jobs:
     - name: Download WarpX
       uses: actions/checkout@v4
       with:
-        repository: 'ECP-WarpX/WarpX'
+        repository: 'BLAST-WarpX/warpx'
         ref: development
         path: 'WarpX'
     - name: Dependencies
@@ -102,8 +102,7 @@ jobs:
             -DWarpX_OPENPMD=OFF                   \
             -DCMAKE_VERBOSE_MAKEFILE=ON           \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache  \
-            -DAMReX_FFT=ON                        \
-            -DAMReX_LINEAR_SOLVERS_INCFLO=OFF
+            -DAMReX_FFT=ON
         cmake --build WarpX/build -j 4
 
         ccache -s
@@ -141,7 +140,7 @@ jobs:
         export CCACHE_LOGFILE=${{ github.workspace }}/ccache.log.txt
         ccache -z
 
-        python3 -m pip install -U pip setuptools wheel
+        python3 -m pip install -U pip setuptools[core] wheel
         python3 -m pip install -U cmake
         python3 -m pip install -U pandas pytest mpi4py
 

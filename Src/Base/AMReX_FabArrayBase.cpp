@@ -88,6 +88,7 @@ bool                               FabArrayBase::m_alloc_single_chunk = false;
 namespace
 {
     bool initialized = false;
+    std::uint64_t comm_meta_data_id = 0;
 }
 
 void
@@ -290,11 +291,14 @@ FabArrayBase::TileArray::bytes () const
 
 FabArrayBase::CPC::CPC (const FabArrayBase& dstfa, const IntVect& dstng,
                         const FabArrayBase& srcfa, const IntVect& srcng,
-                        const Periodicity& period, bool to_ghost_cells_only)
-    : m_srcbdk(srcfa.getBDKey()),
+                        const Periodicity& period, bool to_ghost_cells_only,
+                        const IntVect& offset)
+    : m_id(comm_meta_data_id++),
+      m_srcbdk(srcfa.getBDKey()),
       m_dstbdk(dstfa.getBDKey()),
       m_srcng(srcng),
       m_dstng(dstng),
+      m_offset(offset),
       m_period(period),
       m_tgco(to_ghost_cells_only),
       m_srcba(srcfa.boxArray()),
@@ -309,7 +313,7 @@ FabArrayBase::CPC::CPC (const BoxArray& dstba, const DistributionMapping& dstdm,
                         const BoxArray& srcba, const DistributionMapping& srcdm,
                         const Vector<int>& srcidx, const IntVect& srcng,
                         const Periodicity& period, int myproc)
-    :
+    : m_id(comm_meta_data_id++),
       m_srcng(srcng),
       m_dstng(dstng),
       m_period(period),
@@ -345,7 +349,8 @@ FabArrayBase::CPC::define (const BoxArray& ba_dst, const DistributionMapping& dm
 
         std::vector< std::pair<int,Box> > isects;
 
-        const std::vector<IntVect>& pshifts = m_period.shiftIntVect(ng_dst);
+        std::vector<IntVect> pshifts = m_period.shiftIntVect(ng_dst);
+        for (auto& pit : pshifts) { pit += m_offset; }
 
         auto& send_tags = *m_SndTags;
 
@@ -406,12 +411,12 @@ FabArrayBase::CPC::define (const BoxArray& ba_dst, const DistributionMapping& dm
 
             for (auto const& pit : pshifts)
             {
-                ba_src.intersections(bx_dst+pit, isects, false, ng_src);
+                ba_src.intersections(bx_dst-pit, isects, false, ng_src);
 
                 for (auto const& is : isects)
                 {
                     const int k_src     = is.first;
-                    const Box& bx       = is.second - pit;
+                    const Box& bx       = is.second + pit;
                     const int src_owner = dm_src[k_src];
 
                     BoxList const bl_dst = m_tgco ? boxDiff(bx,bx_dst_valid) : BoxList(bx);
@@ -419,13 +424,13 @@ FabArrayBase::CPC::define (const BoxArray& ba_dst, const DistributionMapping& dm
                         if (ParallelDescriptor::sameTeam(src_owner, MyProc)) { // local copy
                             const BoxList tilelist(b, FabArrayBase::comm_tile_size);
                             for (auto const& btile : tilelist) {
-                                m_LocTags->emplace_back(btile, btile+pit, k_dst, k_src);
+                                m_LocTags->emplace_back(btile, btile-pit, k_dst, k_src);
                             }
                             if (check_local) {
                                 bl_local.push_back(b);
                             }
                         } else if (MyProc == dm_dst[k_dst]) {
-                            recv_tags[src_owner].emplace_back(b, b+pit, k_dst, k_src);
+                            recv_tags[src_owner].emplace_back(b, b-pit, k_dst, k_src);
                             if (check_remote) {
                                 bl_remote.push_back(b);
                             }
@@ -468,7 +473,7 @@ FabArrayBase::CPC::define (const BoxArray& ba_dst, const DistributionMapping& dm
 
 FabArrayBase::CPC::CPC (const BoxArray& ba, const IntVect& ng,
                         const DistributionMapping& dstdm, const DistributionMapping& srcdm)
-    :
+    : m_id(comm_meta_data_id++),
       m_srcng(ng),
       m_dstng(ng),
       m_tgco(false),
@@ -572,7 +577,8 @@ FabArrayBase::flushCPCache ()
 
 const FabArrayBase::CPC&
 FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVect& srcng,
-                      const Periodicity& period, bool to_ghost_cells_only) const
+                      const Periodicity& period, bool to_ghost_cells_only,
+                      const IntVect& offset) const
 {
     BL_PROFILE("FabArrayBase::getCPC()");
 
@@ -589,6 +595,7 @@ FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVe
     {
         if (it->second->m_srcng  == srcng &&
             it->second->m_dstng  == dstng &&
+            it->second->m_offset == offset &&
             it->second->m_srcbdk == srckey &&
             it->second->m_dstbdk == dstkey &&
             it->second->m_period == period &&
@@ -603,7 +610,7 @@ FabArrayBase::getCPC (const IntVect& dstng, const FabArrayBase& src, const IntVe
     }
 
     // Have to build a new one
-    CPC* new_cpc = new CPC(*this, dstng, src, srcng, period, to_ghost_cells_only);
+    CPC* new_cpc = new CPC(*this, dstng, src, srcng, period, to_ghost_cells_only, offset);
 
 #ifdef AMREX_MEM_PROFILING
     m_CPC_stats.bytes += new_cpc->bytes();
@@ -630,7 +637,8 @@ FabArrayBase::FB::FB (const FabArrayBase& fa, const IntVect& nghost,
                       bool cross, const Periodicity& period,
                       bool enforce_periodicity_only, bool override_sync,
                       bool multi_ghost)
-    : m_typ(fa.boxArray().ixType()), m_crse_ratio(fa.boxArray().crseRatio()),
+    : m_id(comm_meta_data_id++),
+      m_typ(fa.boxArray().ixType()), m_crse_ratio(fa.boxArray().crseRatio()),
       m_ngrow(nghost), m_cross(cross), m_epo(enforce_periodicity_only),
       m_override_sync(override_sync),  m_period(period),
       m_multi_ghost(multi_ghost)
@@ -668,8 +676,6 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
     // so that they can share work.  But for remote communication, they are all different.
 
     const int nlocal = static_cast<int>(imap.size());
-    const IntVect& ng = nghost;
-    const IntVect ng_ng =nghost - 1;
     std::vector< std::pair<int,Box> > isects;
 
     const std::vector<IntVect>& pshifts = period.shiftIntVect(nghost);
@@ -680,11 +686,11 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
     {
         const int ksnd = imap[i];
         const Box& vbx = ba[ksnd];
-        const Box& vbx_ng  = amrex::grow(vbx,1);
+        const Box& vbx_ng1  = amrex::grow(vbx,1);
 
         for (auto const& pit : pshifts)
         {
-            ba.intersections(vbx+pit, isects, false, ng);
+            ba.intersections(vbx+pit, isects, false, nghost);
 
             for (auto const& is : isects)
             {
@@ -701,8 +707,8 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
                         // In the case where ngrow>1, augment the send/rcv box list
                         // with boxes for overlapping ghost nodes.
                         const Box& ba_krcv   = amrex::grow(ba[krcv],1);
-                        const Box& dst_bx_ng = (amrex::grow(ba_krcv,ng_ng) & (vbx_ng + pit));
-                        const BoxList &bltmp = ba.complementIn(dst_bx_ng);
+                        const Box& dst_bx_ng = amrex::grow(ba[krcv],nghost) & (vbx_ng1 + pit);
+                        const BoxList &bltmp = ba.complementIn(dst_bx_ng,period);
                         for (auto const& btmp : bltmp)
                         {
                             bl.join(amrex::boxDiff(btmp,ba_krcv));
@@ -743,8 +749,8 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
 
         const int   krcv = imap[i];
         const Box& vbx   = ba[krcv];
-        const Box& vbx_ng  = amrex::grow(vbx,1);
-        const Box& bxrcv = amrex::grow(vbx, ng);
+        const Box& vbx_ng1  = amrex::grow(vbx,1);
+        const Box& bxrcv = amrex::grow(vbx, nghost);
 
         for (auto const& pit : pshifts)
         {
@@ -765,10 +771,10 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
                     Box ba_ksnd = ba[ksnd];
                     ba_ksnd.grow(1);
                     const Box dst_bx_ng = (ba_ksnd & (bxrcv + pit)) - pit;
-                    const BoxList &bltmp = ba.complementIn(dst_bx_ng);
+                    const BoxList &bltmp = ba.complementIn(dst_bx_ng,period);
                     for (auto const& btmp : bltmp)
                     {
-                        bl.join(amrex::boxDiff(btmp,vbx_ng));
+                        bl.join(amrex::boxDiff(btmp,vbx_ng1));
                     }
                     bl.simplify();
                 }
@@ -837,7 +843,7 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
                     for (int dir = 0; dir < AMREX_SPACEDIM; dir++)
                     {
                         Box lo = dstvbx;
-                        lo.setSmall(dir, dstvbx.smallEnd(dir) - ng[dir]);
+                        lo.setSmall(dir, dstvbx.smallEnd(dir) - nghost[dir]);
                         lo.setBig  (dir, dstvbx.smallEnd(dir) - 1);
                         lo &= bx;
                         if (lo.ok()) {
@@ -846,7 +852,7 @@ FabArrayBase::define_fb_metadata (CommMetaData& cmd, const IntVect& nghost,
 
                         Box hi = dstvbx;
                         hi.setSmall(dir, dstvbx.bigEnd(dir) + 1);
-                        hi.setBig  (dir, dstvbx.bigEnd(dir) + ng[dir]);
+                        hi.setBig  (dir, dstvbx.bigEnd(dir) + nghost[dir]);
                         hi &= bx;
                         if (hi.ok()) {
                             boxes.push_back(hi);
@@ -880,8 +886,6 @@ void
 FabArrayBase::FB::define_fb (const FabArrayBase& fa)
 {
     AMREX_ASSERT(m_multi_ghost ? fa.nGrowVect().allGE(2) : true); // must have >= 2 ghost nodes
-    AMREX_ASSERT(m_multi_ghost ? !m_period.isAnyPeriodic() : true); // this only works for non-periodic
-
     fa.define_fb_metadata(*this, m_ngrow, m_cross, m_period, m_multi_ghost);
 }
 
@@ -2337,7 +2341,7 @@ FabArrayBase::buildTileArray (const IntVect& tileSize, TileArray& ta) const
                 ntiles *= nt_in_fab[d];
             }
 
-            IntVect small, big, ijk;  // note that the initial values are all zero.
+            IntVect sml, big, ijk;  // note that the initial values are all zero.
             ijk[0] = -1;
             for (int t = 0; t < ntiles; ++t) {
                 ta.indexMap.push_back(K);
@@ -2356,15 +2360,15 @@ FabArrayBase::buildTileArray (const IntVect& tileSize, TileArray& ta) const
 
                 for (int d=0; d<AMREX_SPACEDIM; d++) {
                     if (ijk[d] < nleft[d]) {
-                        small[d] = ijk[d]*(tsize[d]+1);
-                        big[d] = small[d] + tsize[d];
+                        sml[d] = ijk[d]*(tsize[d]+1);
+                        big[d] = sml[d] + tsize[d];
                     } else {
-                        small[d] = ijk[d]*tsize[d] + nleft[d];
-                        big[d] = small[d] + tsize[d] - 1;
+                        sml[d] = ijk[d]*tsize[d] + nleft[d];
+                        big[d] = sml[d] + tsize[d] - 1;
                     }
                 }
 
-                Box tbx(small, big, IndexType::TheCellType());
+                Box tbx(sml, big, IndexType::TheCellType());
                 tbx.shift(bx.smallEnd());
 
                 ta.tileArray.push_back(tbx);
@@ -2635,15 +2639,12 @@ FabArrayBase::isFusingCandidate () const noexcept // NOLINT(readability-convert-
 
 #ifdef AMREX_USE_GPU
 
-FabArrayBase::ParForInfo::ParForInfo (const FabArrayBase& fa, const IntVect& nghost, int nthreads)
+FabArrayBase::ParForInfo::ParForInfo (const FabArrayBase& fa, const IntVect& nghost)
     : m_bat(fa.boxArray().transformer()),
-      m_ng(nghost),
-      m_nthreads(nthreads),
-      m_nblocks_x({nullptr,nullptr})
+      m_ng(nghost)
 {
     Vector<Box> boxes;
-    Vector<Long> ncells;
-    ncells.reserve(fa.indexArray.size());
+    m_ncellsmax = 0;
     for (int K : fa.indexArray) {
         Long N = 0;
         Box b = fa.box(K);
@@ -2652,31 +2653,30 @@ FabArrayBase::ParForInfo::ParForInfo (const FabArrayBase& fa, const IntVect& ngh
             N = b.numPts();
         }
         boxes.push_back(b);
-        ncells.push_back(N);
+        m_ncellsmax = std::max(m_ncellsmax, N);
     }
-    detail::build_par_for_nblocks(m_hp, m_dp, m_nblocks_x, m_boxes, boxes, ncells, nthreads);
+    detail::build_par_for_boxes(m_hp, m_boxes, boxes);
 }
 
 FabArrayBase::ParForInfo::~ParForInfo ()
 {
-    detail::destroy_par_for_nblocks(m_hp, m_dp);
+    detail::destroy_par_for_boxes(m_hp, (char*)m_boxes);
 }
 
 FabArrayBase::ParForInfo const&
-FabArrayBase::getParForInfo (const IntVect& nghost, int nthreads) const
+FabArrayBase::getParForInfo (const IntVect& nghost) const
 {
     AMREX_ASSERT(getBDKey() == m_bdkey);
     auto er_it = m_TheParForCache.equal_range(m_bdkey);
     for (auto it = er_it.first; it != er_it.second; ++it) {
         if (it->second->m_bat        == boxArray().transformer() &&
-            it->second->m_ng         == nghost                 &&
-            it->second->m_nthreads   == nthreads)
+            it->second->m_ng         == nghost)
         {
             return *(it->second);
         }
     }
 
-    ParForInfo* new_pfi = new ParForInfo(*this, nghost, nthreads);
+    ParForInfo* new_pfi = new ParForInfo(*this, nghost);
     m_TheParForCache.insert(er_it.second,
                             std::multimap<BDKey,ParForInfo*>::value_type(m_bdkey,new_pfi));
     return *new_pfi;
@@ -2704,6 +2704,12 @@ FabArrayBase::flushParForCache ()
 }
 
 #endif
+
+std::uint64_t
+FabArrayBase::getNextCommMetaDataId ()
+{
+    return comm_meta_data_id++;
+}
 
 namespace detail {
 

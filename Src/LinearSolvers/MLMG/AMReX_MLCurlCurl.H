@@ -73,7 +73,7 @@ public:
                 StateMode s_mode, const MLMGBndryT<MF>* bndry=nullptr) const override;
 
     void smooth (int amrlev, int mglev, MF& sol, const MF& rhs,
-                 bool skip_fillboundary=false) const override;
+                 bool skip_fillboundary, int niter) const override;
 
     void solutionResidual (int amrlev, MF& resid, MF& x, const MF& b,
                            const MF* crse_bcdata=nullptr) override;
@@ -81,6 +81,11 @@ public:
     void correctionResidual (int amrlev, int mglev, MF& resid, MF& x,
                              const MF& b, BCMode bc_mode,
                              const MF* crse_bcdata=nullptr) override;
+
+    [[nodiscard]] bool needsUpdate () const override {
+        return (m_needs_update || MLLinOpT<Array<MultiFab,3>>::needsUpdate());
+    }
+    void update () override;
 
     void prepareForSolve () override;
 
@@ -109,7 +114,11 @@ public:
 
 // public for cuda
 
+#if (AMREX_SPACEDIM > 1)
     void smooth4 (int amrlev, int mglev, MF& sol, MF const& rhs, int color) const;
+#else
+    void smooth1D (int amrlev, int mglev, MF& sol, MF const& rhs, int color) const;
+#endif
 
     void compresid (int amrlev, int mglev, MF& resid, MF const& b) const;
 
@@ -124,14 +133,18 @@ private:
     [[nodiscard]] CurlCurlDirichletInfo getDirichletInfo (int amrlev, int mglev) const;
     [[nodiscard]] CurlCurlSymmetryInfo getSymmetryInfo (int amrlev, int mglev) const;
 
+    void update_lusolver ();
+
     RT m_alpha = std::numeric_limits<RT>::lowest();
     RT m_beta  = std::numeric_limits<RT>::lowest();
 
     Array<IntVect,3> m_etype
 #if (AMREX_SPACEDIM == 3)
          {IntVect(0,1,1), IntVect(1,0,1), IntVect(1,1,0)};
-#else
+#elif (AMREX_SPACEDIM == 2)
          {IntVect(0,1), IntVect(1,0), IntVect(1,1)};
+#else
+         {IntVect(0), IntVect(1), IntVect(1)};
 #endif
 
     mutable Vector<Vector<Array<std::unique_ptr<iMultiFab>,3>>> m_dotmask;
@@ -140,6 +153,7 @@ private:
                                   <LUSolver<AMREX_SPACEDIM*2,RT>>>>> m_lusolver;
     Vector<Vector<Array<std::unique_ptr<MultiFab>,3>>> m_bcoefs;
     bool m_use_pcg = false;
+    bool m_needs_update = true;
 };
 
 }

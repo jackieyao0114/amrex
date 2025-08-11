@@ -126,6 +126,11 @@ namespace system
 }
 
 namespace {
+    long long init_minimal_called = 0;
+    bool initialization_by_init_minimal = false;
+}
+
+namespace {
     std::string command_line;
     std::vector<std::string> command_arguments;
 }
@@ -141,7 +146,7 @@ namespace {
     SignalHandler prev_handler_sigabrt = SIG_ERR; // NOLINT(performance-no-int-to-ptr)
     SignalHandler prev_handler_sigfpe  = SIG_ERR; // NOLINT(performance-no-int-to-ptr)
     SignalHandler prev_handler_sigill  = SIG_ERR; // NOLINT(performance-no-int-to-ptr)
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
     int           prev_fpe_excepts = 0;
     int           curr_fpe_excepts = 0;
 #elif defined(__APPLE__) && defined(__x86_64__)
@@ -264,17 +269,18 @@ amrex::Warning_host (const char * msg)
 }
 
 void
-amrex::Assert_host (const char* EX, const char* file, int line, const char* msg)
+amrex::Assert_host (const char* EX, const char* file, int line, const char* msg,
+                    std::size_t msg_size)
 {
 #ifdef AMREX_USE_COVERITY
     amrex_coverity_abort();
 #else
-    const int N = 512;
+    const std::size_t N = 512 + msg_size;
 
-    char buf[N];
+    std::vector<char> buf(N);
 
     if (msg) {
-        snprintf(buf,
+        snprintf(buf.data(),
                  N,
                  "Assertion `%s' failed, file \"%s\", line %d, Msg: %s",
                  EX,
@@ -282,7 +288,7 @@ amrex::Assert_host (const char* EX, const char* file, int line, const char* msg)
                  line,
                  msg);
     } else {
-        snprintf(buf,
+        snprintf(buf.data(),
                  N,
                  "Assertion `%s' failed, file \"%s\", line %d",
                  EX,
@@ -291,11 +297,11 @@ amrex::Assert_host (const char* EX, const char* file, int line, const char* msg)
     }
 
     if (system::error_handler) {
-        system::error_handler(buf);
+        system::error_handler(buf.data());
     } else if (system::throw_exception) {
-        throw RuntimeError(buf);
+        throw RuntimeError(buf.data());
     } else {
-       write_to_stderr_without_buffering(buf);
+       write_to_stderr_without_buffering(buf.data());
 #ifdef AMREX_USE_OMP
 #pragma omp critical (amrex_abort_omp_critical)
 #endif
@@ -333,26 +339,53 @@ amrex::Initialize (MPI_Comm mpi_comm,
 }
 
 amrex::AMReX*
+amrex::Initialize (int& argc, char**& argv,
+                   const std::function<void()>& func_parm_parse,
+                   std::ostream& a_osout, std::ostream& a_oserr,
+                   ErrorHandler a_errhandler)
+{
+    return Initialize(argc, argv, true, MPI_COMM_WORLD, func_parm_parse,
+                      a_osout, a_oserr, a_errhandler);
+}
+
+amrex::AMReX*
 amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
                    MPI_Comm mpi_comm, const std::function<void()>& func_parm_parse,
                    std::ostream& a_osout, std::ostream& a_oserr,
                    ErrorHandler a_errhandler)
 {
     system::exename.clear();
+    if (initialization_by_init_minimal) {
+        system::verbose = 0;
+        system::regtest_reduction = false;
+        system::signal_handling = false;
+        system::handle_sigsegv = false;
+        system::handle_sigterm = false;
+        system::handle_sigint  = false;
+        system::handle_sigabrt = false;
+        system::handle_sigfpe  = false;
+        system::handle_sigill  = false;
+        system::call_addr2line = false;
+        system::throw_exception = false;
+        system::osout = &std::cout;
+        system::oserr = &std::cerr;
+        system::error_handler = nullptr;
+    } else {
 //    system::verbose = 0;
-    system::regtest_reduction = false;
-    system::signal_handling = true;
-    system::handle_sigsegv = true;
-    system::handle_sigterm = false;
-    system::handle_sigint  = true;
-    system::handle_sigabrt = true;
-    system::handle_sigfpe  = true;
-    system::handle_sigill  = true;
-    system::call_addr2line = true;
-    system::throw_exception = false;
-    system::osout = &a_osout;
-    system::oserr = &a_oserr;
-    system::error_handler = a_errhandler;
+        system::regtest_reduction = false;
+        system::signal_handling = true;
+        system::handle_sigsegv = true;
+        system::handle_sigterm = false;
+        system::handle_sigint  = true;
+        system::handle_sigabrt = true;
+        system::handle_sigfpe  = true;
+        system::handle_sigill  = true;
+        system::call_addr2line = true;
+        system::throw_exception = false;
+        system::osout = &a_osout;
+        system::oserr = &a_oserr;
+        system::error_handler = a_errhandler;
+    }
 
     ParallelDescriptor::StartParallel(&argc, &argv, mpi_comm);
 
@@ -506,9 +539,11 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
     }
 #endif
 
+    Machine::Initialize();
+
 #ifdef AMREX_USE_GPU
     // Initialize after ParmParse so that we can read inputs.
-    Gpu::Device::Initialize();
+    Gpu::Device::Initialize(initialization_by_init_minimal);
 #ifdef AMREX_USE_CUPTI
     CuptiInitialize();
 #endif
@@ -584,7 +619,8 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
                 pp.queryAdd("fpe_trap_zero", divbyzero);
                 pp.queryAdd("fpe_trap_overflow", overflow);
 
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
+
                 curr_fpe_excepts = 0;
                 if (invalid)   { curr_fpe_excepts |= FE_INVALID;   }
                 if (divbyzero) { curr_fpe_excepts |= FE_DIVBYZERO; }
@@ -638,13 +674,15 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
     ParallelDescriptor::Initialize();
 
     BL_TINY_PROFILE_MEMORYINITIALIZE();
-    Arena::Initialize();
+    Arena::Initialize(initialization_by_init_minimal);
     amrex_mempool_init();
 
     //
     // Initialize random seed after we're running in parallel.
     //
-    amrex::InitRandom(ParallelDescriptor::MyProc()+1, ParallelDescriptor::NProcs());
+    if (!initialization_by_init_minimal) {
+        amrex::InitRandom(ParallelDescriptor::MyProc()+1, ParallelDescriptor::NProcs());
+    }
 
     // For thread safety, we should do these initializations here.
     BaseFab_Initialize();
@@ -656,7 +694,9 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
     MultiFab::Initialize();
     iMultiFab::Initialize();
     VisMF::Initialize();
-    AsyncOut::Initialize();
+    if (!initialization_by_init_minimal) {
+        AsyncOut::Initialize();
+    }
     VectorGrowthStrategy::Initialize();
 
 #ifdef AMREX_USE_FFT
@@ -669,8 +709,6 @@ amrex::Initialize (int& argc, char**& argv, bool build_parm_parse,
 
     BL_PROFILE_INITPARAMS();
 #endif // ifndef BL_AMRPROF
-
-    machine::Initialize();
 
 #ifdef AMREX_USE_HYPRE
     if (init_hypre) {
@@ -824,7 +862,7 @@ amrex::Finalize (amrex::AMReX* pamrex)
         if (prev_handler_sigabrt != SIG_ERR) { std::signal(SIGABRT, prev_handler_sigabrt); } // NOLINT(performance-no-int-to-ptr)
         if (prev_handler_sigfpe  != SIG_ERR) { std::signal(SIGFPE , prev_handler_sigfpe);  } // NOLINT(performance-no-int-to-ptr)
         if (prev_handler_sigill  != SIG_ERR) { std::signal(SIGILL , prev_handler_sigill);  } // NOLINT(performance-no-int-to-ptr)
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
 #if !defined(__PGI) || (__PGIC__ >= 16)
         if (curr_fpe_excepts != 0) {
             fedisableexcept(curr_fpe_excepts);
@@ -942,7 +980,7 @@ AMReX::erase (AMReX* pamrex)
 FPExcept getFPExcept ()
 {
     auto r = FPExcept::none;
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
     auto excepts = fegetexcept();
     if (excepts & FE_INVALID  ) { r = r | FPExcept::invalid ; }
     if (excepts & FE_DIVBYZERO) { r = r | FPExcept::zero    ; }
@@ -954,7 +992,7 @@ FPExcept getFPExcept ()
 FPExcept setFPExcept (FPExcept excepts)
 {
     auto prev = getFPExcept();
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
     int flags = FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW;
     fedisableexcept(flags);
     flags = 0;
@@ -971,7 +1009,7 @@ FPExcept setFPExcept (FPExcept excepts)
 FPExcept disableFPExcept (FPExcept excepts)
 {
     auto prev = getFPExcept();
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
     int flags = 0;
     if (any(excepts & FPExcept::invalid )) { flags |= FE_INVALID  ; }
     if (any(excepts & FPExcept::zero    )) { flags |= FE_DIVBYZERO; }
@@ -986,7 +1024,7 @@ FPExcept disableFPExcept (FPExcept excepts)
 FPExcept enableFPExcept (FPExcept excepts)
 {
     auto prev = getFPExcept();
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
     int flags = 0;
     if (any(excepts & FPExcept::invalid )) { flags |= FE_INVALID  ; }
     if (any(excepts & FPExcept::zero    )) { flags |= FE_DIVBYZERO; }
@@ -996,6 +1034,27 @@ FPExcept enableFPExcept (FPExcept excepts)
     amrex::ignore_unused(excepts);
 #endif
     return prev;
+}
+
+void Init_minimal (MPI_Comm mpi_comm)
+{
+    ++init_minimal_called;
+
+    if (Initialized()) { return; }
+
+    initialization_by_init_minimal = true;
+    Initialize(mpi_comm);
+}
+
+void Finalize_minimal ()
+{
+    if (init_minimal_called > 0) {
+        --init_minimal_called;
+    }
+    if (init_minimal_called == 0 && initialization_by_init_minimal) {
+        Finalize();
+        initialization_by_init_minimal = false;
+    }
 }
 
 }

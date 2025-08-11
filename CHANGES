@@ -1,3 +1,465 @@
+# 25.08
+
+ ## Highlights:
+
+  * EB anisotropic meshes - changes for cut_face_2d routine (#4554)
+    EB anisotropic - set_eb_data changes (#4577)
+    Correction to EB volume fraction for anisotropic grids (#4587)
+    Correction to EB volume centroid for anisotropic case (#4586)
+
+    These make the necessary changes for EB generation on 3D aniostropic
+    meshes.
+
+  * SUNDIALS interface updates (#4562)
+
+    Major updates have been made to the SUNDIALS interface.
+
+  * AMReX SIMD Helpers (#4520)
+
+    AMReX does not have a concept yet to help users write effective SIMD
+    code on CPU, besides relying on auto-vectorization and pragmas, which
+    are unreliable for any complex enough code. This PR adds initial support
+    for portable user-code by providing build system support and an
+    `AMReX_SIMD.H` header that handles includes & helper types and
+    functions.
+
+  * CMake: `AMReX_FASTMATH` (#4545)
+    CMake: `AMReX::Flags_FASTMATH` Interface Helper Target (#4591)
+
+    Add new general compiler flag for fast-math optimizations. This does not
+    change any defaults
+
+  * Parser: Support comparison chain (#4556)
+
+    Parser now supports comparison chain such as `a <= b <= c`.
+
+ ## Other major changes:
+
+  * CMake: Fix Typo `AMReX_COMPILER_DEFAULT_INLINE` (#4590)
+
+  * Clean #ifdef around default RunOn declaration (#4580)
+
+  * Account for metric term in fluxes due to inhomogeneous Neumann boundary conditions (#4579)
+
+  * Replace `std::numeric_limits<>::infinity()` with `max()` (#4547)
+
+  * Reorganize checkPoint logic into checkPointNow functions (#4567)
+
+  * ParmParse: Remove two Aborts (#4576)
+
+  * FFT Poisson Solver: Support domain not starting with 0 (#4573)
+
+  * Fix Assert in `ReduceToPlaneMF` (#4566)
+
+  * Retry a few times if directory creation fails (#4537)
+
+  * Added GNU compile flags to enable -fPIC for llvm (#4553)
+
+  * ParmParse: Add parser support for bool (#4552)
+
+  * Remove an assertion in AmrLevel::RK (#4551)
+
+  * Reduce use of SuperParticle (#4526)
+
+  * Tweak CArena Defragmentation Strategy (#4531)
+
+# 25.07
+
+  ## Highlights:
+
+  * Fix GPU communication for non-arithmetic types (#4515)
+
+    Previously communication of non-arithmetic types for GPU builds did not
+    work if there were race conditions. This has now been fixed.
+
+  * Parallel Copy with Offset (#4510)
+
+    Add new versions of ParallelCopy and ParallelAdd that effectively shift
+    the source multifab first and then perform copy/add. Previously, one
+    would need to use NonLocalBC::PareallelCopy, which has a relatively more
+    complicated interface.
+
+  * Add STLtools::fillSignedDistance (#4501)
+
+    This adds a new approach for computing signed distances for STL files.
+
+  ## Other major changes:
+
+  * AMRErrorTag: Add PARSER (#4534)
+
+  * Support Dirichlet BC in z-direction in hybrid FFT Poisson solver (#4503)
+
+  * Add getInvalidRandomEngine() for CPU (#4528)
+
+  * Spack Smoke Test: Fix HIP and Add SYCL (#4521)
+
+  * Modernize roctx Annotations (#4523)
+
+  * Add `AMReX_Order.H` (#4517)
+
+  * EB: Move EB without regenerating geometry (#4511)
+
+  * hypre with hip GNUmake improvements (#4514)
+
+  * StateData: add new set functions (#4512)
+
+  * Adding a new overload for MultiFab::norm2 (int comp, int numcomp) (#4509)
+
+  * Delay gpu stream sync in MFIter (#4493)
+
+  * Add paramters for controlling CArena defragmentation (#4479)
+
+  * CMake: Need to set CUDA ARCH for plotfile tools (#4485)
+
+  * Replaced depreciated cub::Max, cub::Min cub::Sum with cuda::maximum<>… (#4500)
+
+  * Added option to use either always use BNorm or ResNorm for calculatin… (#4495)
+
+  * Add support for force-inlined methods in GDB (#4492)
+
+  * Always FillSignedDistance with max grid size of 32 (#4489)
+
+  * Workarounds for Lustre I/O issues (#4426)
+
+  * Communication Optimization: Cache GPU kernel metadata (#4462)
+
+  * Fix constexpr evaulation bug for is_box_tag() in CPU version of Paral… (#4487)
+
+  * Adding new assert check for MLMG to allow for staggered and non-cell … (#4488)
+
+  * Add an --output_dir option to makebuildinfo_C.py (#4490)
+
+# 25.06
+
+  ## Highlights:
+
+  * The default constructor of amrex::RandomEngine in GPU builds has been
+    removed to prevent a common bug where a RandomEngine object is
+    mistakenly created on the device using the default constructor.
+
+  * CArena now uses a new memory defragmentation strategy. It is known that
+    this has caused performance regression on Frontier. A fix for this is
+    currently under review (https://github.com/AMReX-Codes/amrex/pull/4479),
+    and it is expected in the next monthly release.
+
+  * AMReX has previously defined fake MPI data types globally in non-MPI
+    builds for convenience. Unfortunately, this can lead to conflicts with
+    other libraries doing the same. In this release, we have put these MPI
+    data types in non-MPI builds into the amrex namespace. This might break
+    non-MPI builds of some application codes. To fix it, you can explicitly
+    use these data types with `using amrex::mpidatatypes`. For many codes,
+    using a new version of amrex::Initialize that does not need MPI_Comm
+    introduced in this release can also fix the issue.
+
+  ## Other major changes:
+
+  * ParallelCopy: Fix a launch region issue (#4481)
+
+  * Reuse MLEBNodeFDLaplacian and MLCurlCurl (#4480)
+
+  * Add new amrex::Initialize (#4476)
+
+  * GNU Make: Use -g1 for optimized builds with GCC and Clang (#4475)
+
+  * Update rules of check-changes (#4474)
+
+  * Fix compilation of PlotfileToMatLab (#4471)
+
+  * Print max CArena usage (#4468)
+
+  * Put MPI datatypes in separate namespace (#4470)
+
+  * Fix incorrect static_cast in amrex::cast (#4465)
+
+  * Avoid polluting global namespace with MPI types for non-MPI builds (#4463)
+
+  * Parser: Support User defined functions (#4425)
+
+  * ParmParse: Fix backward compatibility issue in #4457 (#4460)
+
+  * Fix RealVect::Zero (#4459)
+
+  * Convert RealVect to RealVectND (#4430)
+
+  * New ParmParse Feature: 2d table (#4457)
+
+  * CMake: NVTX is header-only for CUDA >= 11.2 (#4449)
+
+  * Fix new warnings from size 0 arrays (#4429)
+
+  * Parser: Fix a minor memory leak due to exception (#4442)
+
+  * add conservative linear interpolation for spherical 2d geometry (#4441)
+
+  * CArena free unused memory before allocate (#4451)
+
+  * GNU Make: NVTX is now header only (#4452)
+
+  * Parser Optimization: More aggressive cancellation (#4445)
+
+  * Parser: minor optimization (#4444)
+
+  * Delete RandomEngine's default constructor (#4443)
+
+  * Parser Optimization: Local constant folding (#4428)
+
+# 25.05
+
+  -- SYCL on Windows workaround (#4436)
+
+  -- Fix MF ParallelFor<MT> (#4414)
+
+  -- Avoid calling bisection in MFParallelFor (#4392)
+
+  -- SYCL: Update link flag for huge device code in GNU Make file (#4421)
+
+  -- Hypre & PETSc: Fix compilation when MLMG's MF type is not FabArray (#4422)
+
+  -- iMulitFab: Add more methods (#4410)
+
+  -- HIP Debug Build (#4408)
+
+  -- ReduceToPlaneMF (#4384)
+
+  -- Periodicity boundary support for multi-ghost communication (#4405)
+
+  -- Move the implemetation of the idcpu bit packing to standalone functions. (#4413)
+
+  -- Fix safety of amrex::launch (#4419)
+
+  -- Add utility to create non-periodic turbulence files (#4418)
+
+  -- Add new MPI data type for RealVect (#4416)
+
+  -- Env Variable: `AMREX_DEFAULT_INIT`, etc. (#4165)
+
+  -- Fix a bug in 1d Curl Curl Solver (#4407)
+
+  -- Remove stream sync in build_arrays (#4349)
+
+  -- Combine back-to-back saxpy operations, as well as saxpy next to xpay (#4366)
+
+  -- Guard some stream syncs (#4351)
+
+  -- fix multi-level ParticleToMesh when zero_out_input is false (#4396)
+
+  -- print number of cells per level in fboxinfo (#4403)
+
+  -- Bug fix for index_assert in Array4 (#4400)
+
+  -- Added bounds checking to GPUable arrays (#4395)
+
+  -- Add a way to reuse TagParallelFor Tags (#4348)
+
+# 25.04
+
+  -- Use SingleStreamRegion and NoSyncRegion in MLMG solve (#4355)
+
+  -- Force the alignment of SoA and AoS Particles  (#4375)
+
+  -- Put loop over iter in MLMG smooth (#4352)
+
+  -- More Guard of GNU extensions (#4385)
+
+  -- ParmParse: Type Hints (#4364)
+
+  -- Update CMake for Cray compiler (#4379)
+
+  -- CI: New WarpX Repo (#4368)
+
+  -- Add option to pass an IndexSpace to InterpFromCoarse (#4369)
+
+  -- update docs for HYPRE installation (#4372)
+
+  -- Guard the use of GNU extensions (#4374)
+
+  -- Fixed EB data for anisotropic grids: boundary centroid, normal vector (backward compatible) (#4357)
+
+  -- ParmParse: Add getline and queryline (#4367)
+
+  -- update docs on NsightCompute profiling with / in syntax (#4362)
+
+  -- Replace Elixir with Async Arena (#4354)
+
+  -- More efficient OrientationIter (#4350)
+
+# 25.03
+
+  -- Make Parser CI less sensitive to roundoff errors (#4321)
+
+  -- FFT: Add raw pointer interfaces (#4345)
+
+  -- Update SUNDIALS GNUMake (#4344)
+
+  -- Change FFTW rapth flag (#4343)
+
+  -- Copy comm flags in make_alike (#4341)
+
+  -- GPU Mapping (#4326)
+
+  -- Fix FillRandomNormal for odd number of length (#4338)
+
+  -- Fix new bug in pure soa communication (#4337)
+
+  -- Expose MLCellLinOP::setInterpBndryHalfWidth for non-hypre cases (#4334)
+
+  -- GMRESMLMG: Support Multi-level composite solve (#4271)
+
+  -- Fix optional component communication for pure SoA particles (#4333)
+
+  -- SYCL: fix '-flink-huge-device-code' compiler flag (#4332)
+
+  -- compile MLCurlCurl for 1D in cmake (#4331)
+
+  -- GitHub Runner: ubuntu-20.04 -> ubuntu-24.04 (#4330)
+
+  -- FFT: Support complex to complex transforms (#4329)
+
+  -- FFT: Add batch support (#4327)
+
+  -- Fix recursion-related nvlink warning in RandomGamma (#4324)
+
+  -- Fix a number of tests for GPU (#4323)
+
+  -- Fix: Names in `PC::make_alike` (#4322)
+
+  -- Enable GPU-aware MPI by default (#4318)
+
+  -- Preparation for deprecation of `__AMDGCN_WAVEFRONT_SIZE` (#4311)
+
+  -- Speed up CUDA Toolkit installation in Windows CI (#4310)
+
+  -- GNU Make: Remove old machines like summit and cori (#4312)
+
+# 25.02
+
+  -- SpMatrix: Add constructor for CSR format (#4316)
+
+  -- Modify warning messages about number of GPUs (#4315)
+
+  -- Fix Doxygen with default void std::enable_if_t (#4314)
+
+  -- CUDA On Windows (MSVC) (#4309)
+
+  -- Fix includes (#4308)
+
+  -- Fix CMake Compiler Flag Summary: ID Regex Matching (#4272)
+
+  -- Use std::move (#4307)
+
+  -- ParaView: AnyLocation -> Any Location (#4306)
+
+  -- Documentation: Fix malformed table (#4305)
+
+  -- PC: SoA Name Helpers (#4300)
+
+  -- PC: Ensure Uniqueness of SoA Names (#4299)
+
+  -- PC Names: Same Type, Multiple Vars/Instances (#4302)
+
+  -- Use bigint in HypreSolver test (#4297)
+
+  -- CI: Remove ICC/ICPC (Compiler Classic) (#4303)
+
+  -- Fix: PC Tile Copy w/ Names (#4298)
+
+  -- Add argument for NeighborParticleContainer::Redistribute (#4294)
+
+  -- Fix `AMReX::FFTW` Once (#4293)
+
+  -- Make ParmParse Parser more robust (#4291)
+
+  -- std::clamp -> amrex::Clamp (#4292)
+
+  -- Fix a memory leak in Open BC solver (#4290)
+
+  -- Make using The_Comms_Arena() for particle communication opt-in (#4286)
+
+  -- FFTW: Windows, OMP & Floats (#4282)
+
+  -- SmallMatrix: Assert Lower Bound Index (#4283)
+
+  -- ParmParse `queryAddWithParser` No Const (#4285)
+
+  -- Fix bug in EBData::randomPointOnEB (#4277)
+
+# 25.01
+
+  -- Make FFT safe for slabs (#4268)
+
+  -- Fix sumToLine for multiple components (#4266)
+
+  -- Add version of PC::Checkpoint that allows toggling off certain components. (#4264)
+
+  -- Use async sends in particle communication (#4257)
+
+  -- AMReX Algebra: AlgVector and SpMatrix (#4259)
+
+  -- EBData: New class containing Array4's for all EB data (#4238)
+     Fix OMP bug in #4238 (#4260)
+
+  -- FFT::OpenBCSolver: Fix batch mode (#4255)
+
+  -- use abs for spherical 2d area (#4256)
+
+  -- Cartesian1D curl-curl  (#4242)
+
+# 24.12
+
+  -- FFT::PoissonHybrid: Add solve() needed by ERF (#4250)
+
+  -- Add CMake option: AMReX_CUDA_OBJDIR_AS_TEMPDIR (#4246)
+
+  -- FFT::PoissonHybrid: Support non-periodic boundaries in x & y directions (#4247)
+
+  -- FFT Poisson Solver: Fill ghost cells in solve() function (#4244)
+
+  -- Update GMRES Comments (#4243)
+
+  -- Fix dangling-reference warnings for particle functions. (#4241)
+
+  -- Parser: Use malloc if Arena is not ready (#4240)
+
+  -- Add portable implementation of random numbers drawn from the Gamma distribution. (#4239)
+
+  -- Implementation of Bessel functions of second kind (yn) (#4234)
+
+  -- FFT: Optimization for single process (#4235)
+
+  -- VisMF::Read: Cache BoxArray and DistributionMapping (#4233)
+
+  -- FFT OpenBC Solver: more optimization (#4232)
+
+  -- FFT::PoissonHybrid: Add interfaces for user provided dz (#4229)
+
+  -- FFT OpenBC Solver: Communication optimization (#4230)
+
+  -- Add local FFT (#4224)
+
+  -- FFT: Add new domain decomposition strategy (#4221)
+
+  -- Skip some CIs if only Docs/ has changed (#4197)
+
+  -- Replace blockDim.x with compile time constant when possible (#4198)
+
+  -- FFT: OpenBC Solver (#4217)
+
+  -- STL: Make the fill(MultiFab) function work with non-nodal types (#4207)
+
+  -- Remove repeated norm_inf calculation in bicgsolver. (#4205)
+
+  -- Initial and final function stacks: Use std::function (#4218)
+
+  -- comply with C++ defect report on user-defined literals (#4215)
+
+  -- Fix a bug in EB2::Level::fillLevelSet (#4208)
+
+  -- HDF5: Fix missing header in GNU Make (#4213)
+
+  -- FFT Poisson Solver: Neumann and Dirichlet Boundaries (#4202)
+
+  -- Remove SWFFT and HPGMG (#4211)
+
 # 24.11
 
   -- Add option to do stable redistribute with GPUs (#4200)

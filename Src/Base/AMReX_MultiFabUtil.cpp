@@ -822,7 +822,7 @@ namespace amrex
 #ifdef AMREX_USE_GPU
         if (Gpu::inLaunchRegion())
         {
-            Gpu::DeviceVector<Real> dv(domain.length(direction), Real(0.0));
+            Gpu::DeviceVector<Real> dv(hv.size(), Real(0.0));
             Real* p = dv.data();
 
             for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
@@ -846,10 +846,10 @@ namespace amrex
                 int nblocks = n2dblocks * b.length(direction);
 #ifdef AMREX_USE_SYCL
                 std::size_t shared_mem_byte = sizeof(Real)*Gpu::Device::warp_size;
-                amrex::launch(nblocks, AMREX_GPU_MAX_THREADS, shared_mem_byte, Gpu::gpuStream(),
+                amrex::launch<AMREX_GPU_MAX_THREADS>(nblocks, shared_mem_byte, Gpu::gpuStream(),
                               [=] AMREX_GPU_DEVICE (Gpu::Handler const& h) noexcept
 #else
-                amrex::launch(nblocks, AMREX_GPU_MAX_THREADS, Gpu::gpuStream(),
+                amrex::launch<AMREX_GPU_MAX_THREADS>(nblocks, Gpu::gpuStream(),
                               [=] AMREX_GPU_DEVICE () noexcept
 #endif
                 {

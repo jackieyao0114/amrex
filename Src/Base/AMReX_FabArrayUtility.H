@@ -1101,6 +1101,73 @@ printCell (FabArray<FAB> const& mf, const IntVect& cell, int comp = -1,
 template <class FAB,
           class bar = std::enable_if_t<IsBaseFab<FAB>::value> >
 void
+Swap (FabArray<FAB>& dst, FabArray<FAB>& src, int srccomp, int dstcomp, int numcomp, int nghost)
+{
+    Swap(dst,src,srccomp,dstcomp,numcomp,IntVect(nghost));
+}
+
+template <class FAB,
+          class bar = std::enable_if_t<IsBaseFab<FAB>::value> >
+void
+Swap (FabArray<FAB>& dst, FabArray<FAB>& src, int srccomp, int dstcomp, int numcomp, const IntVect& nghost)
+{
+    // We can take a shortcut and do a std::swap if we're swapping all of the data
+    // and they are allocated in the same Arena.
+
+    bool explicit_swap = true;
+
+    if (srccomp == dstcomp && dstcomp == 0 && src.nComp() == dst.nComp() &&
+        src.nGrowVect() == nghost && src.nGrowVect() == dst.nGrowVect() &&
+        src.arena() == dst.arena() && src.hasEBFabFactory() == dst.hasEBFabFactory()) {
+        explicit_swap = false;
+    }
+
+    if (!explicit_swap) {
+
+        std::swap(dst, src);
+
+    } else {
+#ifdef AMREX_USE_GPU
+        if (Gpu::inLaunchRegion() && dst.isFusingCandidate()) {
+            auto const& dstma = dst.arrays();
+            auto const& srcma = src.arrays();
+            ParallelFor(dst, nghost, numcomp,
+            [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k, int n) noexcept
+            {
+                const auto tmp                 = dstma[box_no](i,j,k,n+dstcomp);
+                dstma[box_no](i,j,k,n+dstcomp) = srcma[box_no](i,j,k,n+srccomp);
+                srcma[box_no](i,j,k,n+srccomp) = tmp;
+            });
+            if (!Gpu::inNoSyncRegion()) {
+                Gpu::streamSynchronize();
+            }
+        } else
+#endif
+        {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+            for (MFIter mfi(dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.growntilebox(nghost);
+                if (bx.ok()) {
+                    auto sfab = src.array(mfi);
+                    auto dfab = dst.array(mfi);
+                    AMREX_HOST_DEVICE_PARALLEL_FOR_4D( bx, numcomp, i, j, k, n,
+                    {
+                        const auto tmp        = dfab(i,j,k,n+dstcomp);
+                        dfab(i,j,k,n+dstcomp) = sfab(i,j,k,n+srccomp);
+                        sfab(i,j,k,n+srccomp) = tmp;
+                    });
+                }
+            }
+        }
+    }
+}
+
+template <class FAB,
+          class bar = std::enable_if_t<IsBaseFab<FAB>::value> >
+void
 Subtract (FabArray<FAB>& dst, FabArray<FAB> const& src, int srccomp, int dstcomp, int numcomp, int nghost)
 {
     Subtract(dst,src,srccomp,dstcomp,numcomp,IntVect(nghost));
@@ -1602,6 +1669,207 @@ Dot (FabArray<FAB> const& x, int xcomp, FabArray<FAB> const& y, int ycomp, int n
     return sm;
 }
 
+/**
+ * \brief Compute dot product of FabArray with itself
+ *
+ * \param x      FabArray
+ * \param xcomp  starting component of x
+ * \param ncomp  number of components
+ * \param nghost number of ghost cells
+ * \param local  If true, MPI communication is skipped.
+ */
+template <typename FAB, std::enable_if_t<IsBaseFab<FAB>::value,int> FOO = 0>
+typename FAB::value_type
+Dot (FabArray<FAB> const& x, int xcomp, int ncomp, IntVect const& nghost, bool local = false)
+{
+    BL_ASSERT(x.nGrowVect().allGE(nghost));
+
+    BL_PROFILE("amrex::Dot()");
+
+    using T = typename FAB::value_type;
+    auto sm = T(0.0);
+#ifdef AMREX_USE_GPU
+    if (Gpu::inLaunchRegion()) {
+        auto const& xma = x.const_arrays();
+        sm = ParReduce(TypeList<ReduceOpSum>{}, TypeList<T>{}, x, nghost,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k) noexcept -> GpuTuple<T>
+        {
+            auto t = T(0.0);
+            auto const& xfab = xma[box_no];
+            for (int n = 0; n < ncomp; ++n) {
+                auto v = xfab(i,j,k,xcomp+n);
+                t += v*v;
+            }
+            return t;
+        });
+    } else
+#endif
+    {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (!system::regtest_reduction) reduction(+:sm)
+#endif
+        for (MFIter mfi(x,true); mfi.isValid(); ++mfi)
+        {
+            Box const& bx = mfi.growntilebox(nghost);
+            auto const& xfab = x.const_array(mfi);
+            AMREX_LOOP_4D(bx, ncomp, i, j, k, n,
+            {
+                auto v = xfab(i,j,k,xcomp+n);
+                sm += v*v;
+            });
+        }
+    }
+
+    if (!local) {
+        ParallelAllReduce::Sum(sm, ParallelContext::CommunicatorSub());
+    }
+
+    return sm;
+}
+
+/**
+ * \brief Compute dot product of two FabArrays in region that mask is true
+ *
+ * \param mask   mask
+ * \param x      first FabArray
+ * \param xcomp  starting component of x
+ * \param y      second FabArray
+ * \param ycomp  starting component of y
+ * \param ncomp  number of components
+ * \param nghost number of ghost cells
+ * \param local  If true, MPI communication is skipped.
+ */
+template <typename IFAB, typename FAB,
+          std::enable_if_t<IsBaseFab<FAB>::value && IsBaseFab<IFAB>::value,int> FOO = 0>
+typename FAB::value_type
+Dot (FabArray<IFAB> const& mask, FabArray<FAB> const& x, int xcomp,
+     FabArray<FAB> const& y, int ycomp, int ncomp, IntVect const& nghost,
+     bool local = false)
+{
+    BL_ASSERT(x.boxArray() == y.boxArray() && x.boxArray() == mask.boxArray());
+    BL_ASSERT(x.DistributionMap() == y.DistributionMap() && x.DistributionMap() == mask.DistributionMap());
+    BL_ASSERT(x.nGrowVect().allGE(nghost) && y.nGrowVect().allGE(nghost) &&
+              mask.nGrowVect().allGE(nghost));
+
+    BL_PROFILE("amrex::Dot()");
+
+    using T = typename FAB::value_type;
+    auto sm = T(0.0);
+#ifdef AMREX_USE_GPU
+    if (Gpu::inLaunchRegion()) {
+        auto const& mma = mask.const_arrays();
+        auto const& xma = x.const_arrays();
+        auto const& yma = y.const_arrays();
+        sm = ParReduce(TypeList<ReduceOpSum>{}, TypeList<T>{}, x, nghost,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k) noexcept -> GpuTuple<T>
+        {
+            auto t = T(0.0);
+            auto m = T(mma[box_no](i,j,k));
+            if (m != 0) {
+                auto const& xfab = xma[box_no];
+                auto const& yfab = yma[box_no];
+                for (int n = 0; n < ncomp; ++n) {
+                    t += xfab(i,j,k,xcomp+n) * yfab(i,j,k,ycomp+n);
+                }
+            }
+            return t*m;
+        });
+    } else
+#endif
+    {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (!system::regtest_reduction) reduction(+:sm)
+#endif
+        for (MFIter mfi(x,true); mfi.isValid(); ++mfi)
+        {
+            Box const& bx = mfi.growntilebox(nghost);
+            auto const& mfab = mask.const_array(mfi);
+            auto const& xfab = x.const_array(mfi);
+            auto const& yfab = y.const_array(mfi);
+            AMREX_LOOP_4D(bx, ncomp, i, j, k, n,
+            {
+                auto m = T(mfab(i,j,k));
+                sm += m * xfab(i,j,k,xcomp+n) * yfab(i,j,k,ycomp+n);
+            });
+        }
+    }
+
+    if (!local) {
+        ParallelAllReduce::Sum(sm, ParallelContext::CommunicatorSub());
+    }
+
+    return sm;
+}
+
+/**
+ * \brief Compute dot product of FabArray with itself in region that mask is true
+ *
+ * \param mask   mask
+ * \param x      FabArray
+ * \param xcomp  starting component of x
+ * \param ncomp  number of components
+ * \param nghost number of ghost cells
+ * \param local  If true, MPI communication is skipped.
+ */
+template <typename IFAB, typename FAB,
+          std::enable_if_t<IsBaseFab<FAB>::value && IsBaseFab<IFAB>::value,int> FOO = 0>
+typename FAB::value_type
+Dot (FabArray<IFAB> const& mask, FabArray<FAB> const& x, int xcomp, int ncomp,
+     IntVect const& nghost, bool local = false)
+{
+    BL_ASSERT(x.boxArray() == mask.boxArray());
+    BL_ASSERT(x.DistributionMap() == mask.DistributionMap());
+    BL_ASSERT(x.nGrowVect().allGE(nghost) && mask.nGrowVect().allGE(nghost));
+
+    BL_PROFILE("amrex::Dot()");
+
+    using T = typename FAB::value_type;
+    auto sm = T(0.0);
+#ifdef AMREX_USE_GPU
+    if (Gpu::inLaunchRegion()) {
+        auto const& mma = mask.const_arrays();
+        auto const& xma = x.const_arrays();
+        sm = ParReduce(TypeList<ReduceOpSum>{}, TypeList<T>{}, x, nghost,
+        [=] AMREX_GPU_DEVICE (int box_no, int i, int j, int k) noexcept -> GpuTuple<T>
+        {
+            auto t = T(0.0);
+            auto m = T(mma[box_no](i,j,k));
+            if (m != 0) {
+                auto const& xfab = xma[box_no];
+                for (int n = 0; n < ncomp; ++n) {
+                    auto v = xfab(i,j,k,xcomp+n);
+                    t += v*v;
+                }
+            }
+            return t*m;
+        });
+    } else
+#endif
+    {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (!system::regtest_reduction) reduction(+:sm)
+#endif
+        for (MFIter mfi(x,true); mfi.isValid(); ++mfi)
+        {
+            Box const& bx = mfi.growntilebox(nghost);
+            auto const& mfab = mask.const_array(mfi);
+            auto const& xfab = x.const_array(mfi);
+            AMREX_LOOP_4D(bx, ncomp, i, j, k, n,
+            {
+                auto m = T(mfab(i,j,k));
+                auto v = xfab(i,j,k,xcomp+n);
+                sm += m*v*v;
+            });
+        }
+    }
+
+    if (!local) {
+        ParallelAllReduce::Sum(sm, ParallelContext::CommunicatorSub());
+    }
+
+    return sm;
+}
+
 //! dst = val
 template <class MF, std::enable_if_t<IsMultiFabLike_v<MF>,int> = 0>
 void setVal (MF& dst, typename MF::value_type val)
@@ -1655,6 +1923,33 @@ void Xpay (MF& dst, typename MF::value_type a, MF const& src, int scomp, int dco
            int ncomp, IntVect const& nghost)
 {
     MF::Xpay(dst, a, src, scomp, dcomp, ncomp, nghost);
+}
+
+//! dst += a_saxpy * src_saxpy followed by dst = src_xpay + a_xpay * dst
+template <class MF, std::enable_if_t<IsMultiFabLike_v<MF>,int> = 0>
+void Saxpy_Xpay (MF& dst, typename MF::value_type a_saxpy, MF const& src_saxpy,
+                 typename MF::value_type a_xpay, MF const& src_xpay, int scomp, int dcomp,
+                 int ncomp, IntVect const& nghost)
+{
+    MF::Saxpy_Xpay(dst, a_saxpy, src_saxpy, a_xpay, src_xpay, scomp, dcomp, ncomp, nghost);
+}
+
+//! dst1 += a1 * src1 followed by dst2 += a2 * src2
+template <class MF, std::enable_if_t<IsMultiFabLike_v<MF>,int> = 0>
+void Saxpy_Saxpy (MF& dst1, typename MF::value_type a1, MF const& src1,
+                  MF& dst2, typename MF::value_type a2, MF const& src2, int scomp, int dcomp,
+                  int ncomp, IntVect const& nghost)
+{
+    MF::Saxpy_Saxpy(dst1, a1, src1, dst2, a2, src2, scomp, dcomp, ncomp, nghost);
+}
+
+//! dst1 += a1 * dst2 followed by dst2 += a2 * src
+template <class MF, std::enable_if_t<IsMultiFabLike_v<MF>,int> = 0>
+void Saypy_Saxpy (MF& dst1, typename MF::value_type a1,
+                  MF& dst2, typename MF::value_type a2, MF const& src, int scomp, int dcomp,
+                  int ncomp, IntVect const& nghost)
+{
+    MF::Saypy_Saxpy(dst1, a1, dst2, a2, src, scomp, dcomp, ncomp, nghost);
 }
 
 //! dst = a*src_a + b*src_b
@@ -1826,6 +2121,76 @@ template <class MF, std::size_t N, std::enable_if_t<IsMultiFabLike_v<MF> && (N >
 DistributionMap (Array<MF,N> const& mf)
 {
     return mf[0].DistributionMap();
+}
+
+/*
+ * \brief Return a mask indicating how many duplicates are in each point
+ *
+ * \param fa     input FabArray
+ * \param nghost number of ghost cells included in counting
+ * \param period periodicity
+ */
+template <class FAB>
+FabArray<BaseFab<int>>
+OverlapMask (FabArray<FAB> const& fa, IntVect const& nghost, Periodicity const& period)
+{
+    BL_PROFILE("OverlapMask()");
+
+    const BoxArray& ba = fa.boxArray();
+    const DistributionMapping& dm = fa.DistributionMap();
+
+    FabArray<BaseFab<int>> mask(ba, dm, 1, nghost);
+    mask.setVal(1);
+
+    const std::vector<IntVect>& pshifts = period.shiftIntVect();
+
+    Vector<Array4BoxTag<int> > tags;
+
+    bool run_on_gpu = Gpu::inLaunchRegion();
+    amrex::ignore_unused(run_on_gpu, tags);
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (!run_on_gpu)
+#endif
+    {
+        std::vector< std::pair<int,Box> > isects;
+
+        for (MFIter mfi(mask); mfi.isValid(); ++mfi)
+        {
+            const Box& bx = mask[mfi].box();
+            auto const& arr = mask.array(mfi);
+
+            for (const auto& iv : pshifts)
+            {
+                ba.intersections(bx+iv, isects, false, nghost);
+                for (const auto& is : isects)
+                {
+                    Box const& b = is.second-iv;
+                    if (iv == 0 && b == bx) { continue; }
+#ifdef AMREX_USE_GPU
+                    if (run_on_gpu) {
+                        tags.push_back({arr,b});
+                    } else
+#endif
+                    {
+                        amrex::LoopConcurrentOnCpu(b, [=] (int i, int j, int k) noexcept
+                        {
+                            arr(i,j,k) += 1;
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+#ifdef AMREX_USE_GPU
+    amrex::ParallelFor(tags, 1,
+    [=] AMREX_GPU_DEVICE (int i, int j, int k, int n, Array4BoxTag<int> const& tag) noexcept
+    {
+        Gpu::Atomic::AddNoRet(tag.dfab.ptr(i,j,k,n), 1);
+    });
+#endif
+
+    return mask;
 }
 
 }

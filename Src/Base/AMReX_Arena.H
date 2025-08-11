@@ -57,6 +57,7 @@ struct ArenaInfo
     bool device_set_readonly = false;
     bool device_set_preferred = false;
     bool device_use_hostalloc = false;
+    bool defragmentation = false;
     ArenaInfo& SetReleaseThreshold (Long rt) noexcept {
         release_threshold = rt;
         return *this;
@@ -87,6 +88,10 @@ struct ArenaInfo
         device_set_readonly = false;
         device_set_preferred = false;
         device_use_hostalloc = false;
+        return *this;
+    }
+    ArenaInfo& SetDefragmentation (bool b) noexcept {
+        defragmentation = b;
         return *this;
     }
 };
@@ -187,8 +192,8 @@ public:
     */
     static std::size_t align (std::size_t sz);
 
-    static void Initialize ();
-    static void PrintUsage ();
+    static void Initialize (bool minimal);
+    static void PrintUsage (bool print_max_usage=false);
     static void PrintUsageToFiles (std::string const& filename, std::string const& message);
     static void Finalize ();
 
@@ -209,6 +214,8 @@ public:
      *  \brief Return the ArenaInfo object for querying
      */
     [[nodiscard]] const ArenaInfo& arenaInfo () const { return arena_info; }
+
+    virtual void ResetMaxUsageCounter () {}
 
 protected:
 

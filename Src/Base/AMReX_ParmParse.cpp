@@ -5,6 +5,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 #include <AMReX_RealVect.H>
+#include <AMReX_String.H>
 #include <AMReX_Utility.H>
 
 #include <algorithm>
@@ -28,7 +29,7 @@ namespace amrex {
 namespace {
     bool initialized = false;
     ParmParse::Table g_table;
-    std::vector<std::set<std::string>> g_parser_recursive_symbols;
+    std::vector<std::set<std::string>> g_parser_recursive_symbols(1);
     namespace pp_detail {
         int verbose = -1;
     }
@@ -181,7 +182,8 @@ enum lexState
     STRING,
     QUOTED_STRING,
     IDENTIFIER,
-    LIST
+    LIST,
+    INITIALIZER
 };
 
 int
@@ -197,6 +199,7 @@ eat_garbage (const char*& str)
             {
                 str++;
             }
+            if (*str == '\n') { str++; }
             continue;
         }
         else if ( std::isspace(*str) )
@@ -227,6 +230,17 @@ eat_garbage (const char*& str)
     return num_linefeeds;
 }
 
+void eat_comment (const char*& str)
+{
+    if ( *str == '#' )
+    {
+        while ( *str && *str != '\n' )
+        {
+            str++;
+        }
+    }
+}
+
 PType
 getToken (const char*& str, std::string& ostr, int& num_linefeeds)
 {
@@ -246,6 +260,7 @@ getToken (const char*& str, std::string& ostr, int& num_linefeeds)
    //
    lexState state = START;
    int      pcnt  = 0; // Tracks nested parens
+   int      cbcnt = 0; // Tracks nested curly braces
    while (true)
    {
        char ch = *str;
@@ -270,6 +285,11 @@ getToken (const char*& str, std::string& ostr, int& num_linefeeds)
            {
                ostr += ch; str++; pcnt = 1;
                state = LIST;
+           }
+           else if ( ch == '{' )
+           {
+               ostr += ch; str++; cbcnt = 1;
+               state = INITIALIZER;
            }
            else if ( std::isalpha(ch) )
            {
@@ -298,6 +318,8 @@ getToken (const char*& str, std::string& ostr, int& num_linefeeds)
            }
            break;
        case LIST:
+           eat_comment(str);
+           ch = *str;
            if ( ch == '(' )
            {
                ostr += ch; str++; pcnt++;
@@ -305,7 +327,27 @@ getToken (const char*& str, std::string& ostr, int& num_linefeeds)
            else if ( ch == ')' )
            {
                ostr += ch; str++; pcnt--;
-               if ( pcnt == 0 )
+               if ( pcnt == 0 && cbcnt == 0 )
+               {
+                   return pValue;
+               }
+           }
+           else
+           {
+               ostr += ch; str++;
+           }
+           break;
+       case INITIALIZER:
+           eat_garbage(str);
+           ch = *str;
+           if ( ch == '{' )
+           {
+               ostr += ch; str++; cbcnt++;
+           }
+           else if ( ch == '}' )
+           {
+               ostr += ch; str++; cbcnt--;
+               if ( cbcnt == 0 && pcnt == 0 )
                {
                    return pValue;
                }
@@ -574,10 +616,6 @@ bldTable (const char*& str, ParmParse::Table& tab)
         }
         case pEQ_sign:
         {
-            if ( cur_name.empty() )
-            {
-                amrex::Abort("ParmParse::bldTable() EQ with no current defn");
-            }
             if ( !cur_list.empty() )
             {
                 //
@@ -606,7 +644,7 @@ bldTable (const char*& str, ParmParse::Table& tab)
         {
             if ( cur_name.empty() )
             {
-                cur_name = tokname;
+                cur_name = std::move(tokname);
                 break;
             }
             //
@@ -616,13 +654,7 @@ bldTable (const char*& str, ParmParse::Table& tab)
         }
         case pValue:
         {
-            if ( cur_name.empty() )
-            {
-                std::string msg("ParmParse::bldTable(): value with no defn: ");
-                msg += tokname;
-                amrex::Abort(msg.c_str());
-            }
-            cur_list.push_back(tokname);
+            cur_list.push_back(std::move(tokname));
             cur_linefeeds.push_back(num_linefeeds);
             break;
         }
@@ -676,7 +708,8 @@ squeryval (const ParmParse::Table& table,
     bool ok = is(valname, ref);
     if ( !ok )
     {
-        if constexpr (std::is_same_v<T,int> ||
+        if constexpr (std::is_same_v<T,bool> ||
+                      std::is_same_v<T,int> ||
                       std::is_same_v<T,long> ||
                       std::is_same_v<T,long long> ||
                       std::is_same_v<T,float> ||
@@ -731,7 +764,7 @@ sgetval (const ParmParse::Table& table,
 
         amrex::ErrorStream() << "ParmParse::getval(): "
                              << name
-                             << " not found in table"
+                             << " not found in database"
                              << '\n';
         ParmParse::dumpTable(amrex::ErrorStream());
         amrex::Abort();
@@ -846,7 +879,7 @@ sgetarr (const ParmParse::Table& table,
         }
         amrex::ErrorStream() << "ParmParse::sgetarr(): "
                              << name
-                             << " not found in table"
+                             << " not found in database"
                              << '\n';
         ParmParse::dumpTable(amrex::ErrorStream());
         amrex::Abort();
@@ -863,6 +896,8 @@ saddval (const std::string& name, const T& ref)
     auto& entry = g_table[name];
     entry.m_vals.emplace_back(std::vector<std::string>{val.str()});
     ++entry.m_count;
+    using T_ptr = std::decay_t<T>*;
+    entry.m_typehint = static_cast<T_ptr>(nullptr);
 }
 
 template <class T>
@@ -880,12 +915,21 @@ saddarr (const std::string& name, const std::vector<T>& ref)
     auto& entry = g_table[name];
     entry.m_vals.emplace_back(std::move(arr));
     ++entry.m_count;
+    using T_ptr = std::decay_t<T>*;
+    entry.m_typehint = static_cast<T_ptr>(nullptr);
 }
 
 // Initialize ParmParse.
 void
 ppinit (int argc, char** argv, const char* parfile, ParmParse::Table& table)
 {
+    // Check environment first
+    if (char const* env = std::getenv("AMREX_DEFAULT_INIT")) {
+        std::string env_s = std::string(env) + '\n';
+        char const* s = env_s.c_str();
+        bldTable(s, table);
+    }
+
     if ( parfile != nullptr )
     {
         read_file(parfile, table);
@@ -958,14 +1002,16 @@ bool squeryWithParser (const ParmParse::Table& table,
                        const std::string&      name,
                        T&                      ref);
 
-template <typename T, typename PARSER_t = std::conditional_t<std::is_integral_v<T>,
+template <typename T, typename PARSER_t = std::conditional_t<std::is_integral_v<T>
+                                                             && !std::is_same_v<bool,T>,
                                                              IParser, Parser>>
 PARSER_t
 pp_make_parser (std::string const& func, Vector<std::string> const& vars,
                 ParmParse::Table const& table, std::string const& parser_prefix,
                 bool use_querywithparser)
 {
-    using value_t =  std::conditional_t<std::is_integral_v<T>, long long, double>;
+    using value_t =  std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool,T>,
+                                        long long, double>;
 
     std::vector<std::string> prefixes;
     prefixes.reserve(3);
@@ -1205,6 +1251,7 @@ ParmParse::Finalize ()
 #endif
 
     g_parser_recursive_symbols.clear();
+    g_parser_recursive_symbols.resize(1);
 
     pp_detail::verbose = -1;
     initialized = false;
@@ -1891,6 +1938,25 @@ ParmParse::getarr (const char* name, RealVect& ref) const
     for (int i = 0; i < AMREX_SPACEDIM; ++i) { ref[i] = v[i]; }
 }
 
+void
+ParmParse::getline (const char* name, std::string& ref) const
+{
+    std::vector<std::string> tmp;
+    getarr(name, tmp);
+    ref = amrex::join(tmp, ' ');
+}
+
+int
+ParmParse::queryline (const char* name, std::string& ref) const
+{
+    std::vector<std::string> tmp;
+    auto r = queryarr(name, tmp);
+    if (r) {
+        ref = amrex::join(tmp, ' ');
+    }
+    return r;
+}
+
 //
 // Return number of occurrences of parameter name.
 //
@@ -1976,6 +2042,12 @@ bool squeryarrWithParser (const ParmParse::Table& table,
 }
 
 int
+ParmParse::queryWithParser (const char* name, bool& ref) const
+{
+    return squeryWithParser(*m_table,m_parser_prefix,prefixedName(name),ref);
+}
+
+int
 ParmParse::queryWithParser (const char* name, int& ref) const
 {
     return squeryWithParser(*m_table,m_parser_prefix,prefixedName(name),ref);
@@ -2003,6 +2075,12 @@ int
 ParmParse::queryWithParser (const char* name, double& ref) const
 {
     return squeryWithParser(*m_table,m_parser_prefix,prefixedName(name),ref);
+}
+
+int
+ParmParse::queryarrWithParser (const char* name, int nvals, bool* ref) const
+{
+    return squeryarrWithParser(*m_table,m_parser_prefix,prefixedName(name),nvals,ref);
 }
 
 int
@@ -2047,6 +2125,105 @@ ParmParse::makeIParser (std::string const& func,
                         Vector<std::string> const& vars) const
 {
     return pp_make_parser<long long>(func, vars, *m_table, m_parser_prefix, true);
+}
+
+namespace
+{
+template <typename T>
+std::vector<T> read_table_row (std::istream& is)
+{
+    std::vector<T> r;
+    is >> std::ws;
+    char c;
+    T v{};
+    is >> c;
+    if (c == '{') {
+        is >> v;
+        r.push_back(v);
+        while (true) {
+            is >> std::ws;
+            auto nc = is.peek();
+            if (nc == ',') {
+                is.ignore(10000, ',');
+                is >> v;
+                r.push_back(v);
+                continue;
+            } else {
+                break;
+            }
+        }
+        is.ignore(100000,  '}');
+    } else {
+        amrex::Error("ParmParse::querytable: read_table_row expected \'{\'");
+    }
+    if (is.fail()) {
+        amrex::Error("ParmParse::querytable read_table_row failed to read table");
+    }
+    return r;
+}
+
+template <typename T>
+void read_table (std::vector<std::vector<T>>& ref, std::string const& str)
+{
+    std::istringstream is(str);
+    is >> std::ws;
+    char c;
+    is >> c;
+    if (c == '{') {
+        for (int row_index = 0; row_index < 1000000; ++row_index) {
+            if (auto row = read_table_row<T>(is); ! row.empty()) {
+                if (row_index == 0) { ref.clear(); }
+                ref.emplace_back(std::move(row));
+            } else {
+                break;
+            }
+            is >> std::ws;
+            auto nc = is.peek();
+            if (nc == ',') {
+                is >> c; // skip optional ','
+                is >> std::ws;
+                nc = is.peek();
+            }
+            if (nc == '}') { break; }
+        }
+        is.ignore(100000,  '}');
+    } else {
+        amrex::Error("ParmParse::querytable: read_table expected \'{\'");
+    }
+    if (is.fail()) {
+        amrex::Error("ParmParse::querytable read_table failed to read table");
+    }
+}
+}
+
+int ParmParse::querytable (const char* name, std::vector<std::vector<double>>& ref) const
+{
+    std::string table_s;
+    int r = query(name, table_s);
+    if (r) {
+        read_table(ref, table_s);
+    }
+    return r;
+}
+
+int ParmParse::querytable (const char* name, std::vector<std::vector<float>>& ref) const
+{
+    std::string table_s;
+    int r = query(name, table_s);
+    if (r) {
+        read_table(ref, table_s);
+    }
+    return r;
+}
+
+int ParmParse::querytable (const char* name, std::vector<std::vector<int>>& ref) const
+{
+    std::string table_s;
+    int r = query(name, table_s);
+    if (r) {
+        read_table(ref, table_s);
+    }
+    return r;
 }
 
 }

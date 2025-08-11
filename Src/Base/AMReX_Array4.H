@@ -157,7 +157,7 @@ namespace amrex {
         [[nodiscard]] AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
         T* ptr (int i, int j, int k, int n) const noexcept {
 #if defined(AMREX_DEBUG) || defined(AMREX_BOUND_CHECK)
-            index_assert(i,j,k,0);
+            index_assert(i,j,k,n);
 #endif
             return p + ((i-begin.x)+(j-begin.y)*jstride+(k-begin.z)*kstride+n*nstride);
         }
@@ -265,7 +265,11 @@ namespace amrex {
         }
 
 #if defined(AMREX_DEBUG) || defined(AMREX_BOUND_CHECK)
+#if defined(AMREX_USE_HIP)
+        AMREX_GPU_HOST_DEVICE AMREX_NO_INLINE
+#else
         AMREX_GPU_HOST_DEVICE inline
+#endif
         void index_assert (int i, int j, int k, int n) const
         {
             if (i<begin.x || i>=end.x || j<begin.y || j>=end.y || k<begin.z || k>=end.z

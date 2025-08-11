@@ -206,7 +206,9 @@ MLCellABecLapT<MF>::define (const Vector<Geometry>& a_geom,
                 {
                     coarsen_overset_mask(i,j,k, crsema[box_no], finema[box_no]);
                 });
-                Gpu::streamSynchronize();
+                if (!Gpu::inNoSyncRegion()) {
+                    Gpu::streamSynchronize();
+                }
             } else
 #endif
             {
@@ -263,7 +265,9 @@ MLCellABecLapT<MF>::setDirichletNodesToZero (int amrlev, int mglev, MF& mf) cons
         {
             if (mskma[bno](i,j,k) == 0) { ma[bno](i,j,k,n) = RT(0.0); }
         });
-        Gpu::streamSynchronize();
+        if (!Gpu::inNoSyncRegion()) {
+            Gpu::streamSynchronize();
+        }
     }
 }
 
@@ -281,12 +285,14 @@ MLCellABecLapT<MF>::getFluxes (const Vector<Array<MF*,AMREX_SPACEDIM> >& a_flux,
     for (int alev = 0; alev < nlevs; ++alev) {
         this->compFlux(alev, a_flux[alev], *a_sol[alev], a_loc);
         for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-            this->unapplyMetricTerm(alev, 0, *a_flux[alev][idim]);
             if (betainv != RT(1.0)) {
                 a_flux[alev][idim]->mult(betainv, 0, ncomp);
             }
         }
         this->addInhomogNeumannFlux(alev, a_flux[alev], *a_sol[alev], true);
+        for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
+            this->unapplyMetricTerm(alev, 0, *a_flux[alev][idim]);
+        }
     }
 }
 
@@ -639,7 +645,9 @@ MLCellABecLapT<MF>::applyOverset (int amrlev, MF& rhs) const
                     rhsa[box_no](i,j,k,n) = RT(0.0);
                 }
             });
-            Gpu::streamSynchronize();
+            if (!Gpu::inNoSyncRegion()) {
+                Gpu::streamSynchronize();
+            }
         } else
 #endif
         {

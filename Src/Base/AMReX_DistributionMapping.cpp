@@ -649,6 +649,7 @@ knapsack (const std::vector<Long>&         wgts,
         }
     }
 
+    AMREX_ASSERT(nprocs > 0 && max_weight > Real(0));
     efficiency = sum_weight/(static_cast<Real>(nprocs)*max_weight);
 
     std::sort(wblv.begin(), wblv.end());
@@ -982,6 +983,7 @@ DistributionMapping::KnapSackProcessorMap (const DistributionMapping& olddm,
                 }
             }
 
+            AMREX_ASSERT(max_weight > Real(0));
             new_efficiency = avg_weight / max_weight;
 
             if (new_efficiency < max_efficiency && wblv.size() > 1) {
@@ -2042,7 +2044,7 @@ DistributionMapping MakeSimilarDM (const BoxArray& ba, const BoxArray& src_ba,
                                    const DistributionMapping& src_dm, const IntVect& ng)
 {
     AMREX_ASSERT_WITH_MESSAGE(ba.ixType() == src_ba.ixType(),
-                              "input BoxArrays must have the same centering.";);
+                              "input BoxArrays must have the same centering.");
 
     Vector<int> pmap(ba.size());
     for (int i = 0; i < static_cast<int>(ba.size()); ++i) {

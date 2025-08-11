@@ -209,7 +209,7 @@ T PrefixSum_mp (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum)
     T* blocksum_p = (T*)(dp + nbytes_blockresult);
     T* totalsum_p = (T*)(dp + nbytes_blockresult + nbytes_blocksum);
 
-    amrex::launch(nblocks, nthreads, sm, stream,
+    amrex::launch<nthreads>(nblocks, sm, stream,
     [=] AMREX_GPU_DEVICE (Gpu::Handler const& gh) noexcept
     {
         sycl::sub_group const& sg = gh.item->get_sub_group();
@@ -289,7 +289,7 @@ T PrefixSum_mp (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum)
         }
     });
 
-    amrex::launch(1, nthreads, sm, stream,
+    amrex::launch<nthreads>(1, sm, stream,
     [=] AMREX_GPU_DEVICE (Gpu::Handler const& gh) noexcept
     {
         sycl::sub_group const& sg = gh.item->get_sub_group();
@@ -355,7 +355,7 @@ T PrefixSum_mp (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum)
         }
     });
 
-    amrex::launch(nblocks, nthreads, 0, stream,
+    amrex::launch<nthreads>(nblocks, 0, stream,
     [=] AMREX_GPU_DEVICE (Gpu::Handler const& gh) noexcept
     {
         int threadIdxx = gh.item->get_local_id(0);
@@ -385,7 +385,7 @@ T PrefixSum_mp (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum)
 #endif
 
 template <typename T, typename N, typename FIN, typename FOUT, typename TYPE,
-          typename M=std::enable_if_t<std::is_integral<N>::value &&
+          typename M=std::enable_if_t<std::is_integral_v<N> &&
                                       (std::is_same<std::decay_t<TYPE>,Type::Inclusive>::value ||
                                        std::is_same<std::decay_t<TYPE>,Type::Exclusive>::value)> >
 T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum)
@@ -429,7 +429,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
         }
     });
 
-    amrex::launch(nblocks, nthreads, sm, stream,
+    amrex::launch<nthreads>(nblocks, sm, stream,
     [=] AMREX_GPU_DEVICE (Gpu::Handler const& gh) noexcept
     {
         sycl::sub_group const& sg = gh.item->get_sub_group();
@@ -624,7 +624,7 @@ T PrefixSum (N n, FIN && fin, FOUT && fout, TYPE type, RetSum a_ret_sum = retSum
 #elif defined(AMREX_USE_HIP)
 
 template <typename T, typename N, typename FIN, typename FOUT, typename TYPE,
-          typename M=std::enable_if_t<std::is_integral<N>::value &&
+          typename M=std::enable_if_t<std::is_integral_v<N> &&
                                       (std::is_same<std::decay_t<TYPE>,Type::Inclusive>::value ||
                                        std::is_same<std::decay_t<TYPE>,Type::Exclusive>::value)> >
 T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = retSum)
@@ -672,7 +672,7 @@ T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = ret
         (reinterpret_cast<OrderedBlockId::id_type*>(dp + nbytes_tile_state));
 
     // Init ScanTileState on device
-    amrex::launch((nblocks+nthreads-1)/nthreads, nthreads, 0, stream, [=] AMREX_GPU_DEVICE ()
+    amrex::launch<nthreads>((nblocks+nthreads-1)/nthreads, 0, stream, [=] AMREX_GPU_DEVICE ()
     {
         auto& scan_tile_state = const_cast<ScanTileState&>(tile_state);
         auto& scan_bid = const_cast<OrderedBlockId&>(ordered_block_id);
@@ -787,7 +787,7 @@ T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = ret
 #elif defined(AMREX_USE_CUDA) && defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 11)
 
 template <typename T, typename N, typename FIN, typename FOUT, typename TYPE,
-          typename M=std::enable_if_t<std::is_integral<N>::value &&
+          typename M=std::enable_if_t<std::is_integral_v<N> &&
                                       (std::is_same<std::decay_t<TYPE>,Type::Inclusive>::value ||
                                        std::is_same<std::decay_t<TYPE>,Type::Exclusive>::value)> >
 T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = retSum)
@@ -813,7 +813,7 @@ T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = ret
 
     if (nblocks > 1) {
         // Init ScanTileState on device
-        amrex::launch((nblocks+nthreads-1)/nthreads, nthreads, 0, stream, [=] AMREX_GPU_DEVICE ()
+        amrex::launch<nthreads>((nblocks+nthreads-1)/nthreads, 0, stream, [=] AMREX_GPU_DEVICE ()
         {
             const_cast<ScanTileState&>(tile_state).InitializeStatus(nblocks);
         });
@@ -827,7 +827,13 @@ T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = ret
         using BlockLoad = cub::BlockLoad<T, nthreads, nelms_per_thread, cub::BLOCK_LOAD_WARP_TRANSPOSE>;
         using BlockScan = cub::BlockScan<T, nthreads, cub::BLOCK_SCAN_WARP_SCANS>;
         using BlockExchange = cub::BlockExchange<T, nthreads, nelms_per_thread>;
-        using TilePrefixCallbackOp = cub::TilePrefixCallbackOp<T, cub::Sum, ScanTileState>;
+
+#ifdef AMREX_CUDA_CCCL_VER_3
+        using Sum = cuda::std::plus<T>;
+#else
+        using Sum = cub::Sum;
+#endif
+        using TilePrefixCallbackOp = cub::TilePrefixCallbackOp<T, Sum, ScanTileState>;
 
         __shared__ union TempStorage
         {
@@ -881,7 +887,7 @@ T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = ret
             T last = data[nelms_per_thread-1]; // Need this for the total sum in exclusive case
 
             TilePrefixCallbackOp prefix_op(scan_tile_state, temp_storage.scan_storeage.prefix,
-                                           cub::Sum{}, virtual_block_id);
+                                           Sum{}, virtual_block_id);
             AMREX_IF_CONSTEXPR(is_exclusive) {
                 BlockScan(temp_storage.scan_storeage.scan).ExclusiveSum(data, data, prefix_op);
             } else {
@@ -920,7 +926,7 @@ T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = ret
 #else
 
 template <typename T, typename N, typename FIN, typename FOUT, typename TYPE,
-          typename M=std::enable_if_t<std::is_integral<N>::value &&
+          typename M=std::enable_if_t<std::is_integral_v<N> &&
                                       (std::is_same<std::decay_t<TYPE>,Type::Inclusive>::value ||
                                        std::is_same<std::decay_t<TYPE>,Type::Exclusive>::value)> >
 T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = retSum)
@@ -957,7 +963,7 @@ T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = ret
         }
     });
 
-    amrex::launch(nblocks, nthreads, sm, stream,
+    amrex::launch<nthreads>(nblocks, sm, stream,
     [=] AMREX_GPU_DEVICE () noexcept
     {
         int lane = threadIdx.x % Gpu::Device::warp_size;
@@ -1164,7 +1170,7 @@ T PrefixSum (N n, FIN const& fin, FOUT const& fout, TYPE, RetSum a_ret_sum = ret
 #endif
 
 // The return value is the total sum if a_ret_sum is true.
-template <typename N, typename T, typename M=std::enable_if_t<std::is_integral<N>::value> >
+template <typename N, typename T, typename M=std::enable_if_t<std::is_integral_v<N>> >
 T InclusiveSum (N n, T const* in, T * out, RetSum a_ret_sum = retSum)
 {
 #if defined(AMREX_USE_CUDA) && defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 11)
@@ -1225,7 +1231,7 @@ T InclusiveSum (N n, T const* in, T * out, RetSum a_ret_sum = retSum)
 }
 
 // The return value is the total sum if a_ret_sum is true.
-template <typename N, typename T, typename M=std::enable_if_t<std::is_integral<N>::value> >
+template <typename N, typename T, typename M=std::enable_if_t<std::is_integral_v<N>> >
 T ExclusiveSum (N n, T const* in, T * out, RetSum a_ret_sum = retSum)
 {
     if (n <= 0) { return 0; }

@@ -25,7 +25,7 @@
 #endif
 
 #if defined(AMREX_USE_HIP) && defined(AMREX_USE_ROCTX)
-#include <roctracer/roctx.h>
+#include <rocprofiler-sdk-roctx/roctx.h>
 #endif
 
 #include <algorithm>
@@ -308,7 +308,7 @@ TinyProfiler::memory_free (std::size_t nbytes, MemStat* stat) noexcept
 
 
 void
-TinyProfiler::Initialize () noexcept
+TinyProfiler::Initialize ()
 {
     {
         amrex::ParmParse pp("tiny_profiler");
@@ -332,7 +332,7 @@ TinyProfiler::Initialize () noexcept
 }
 
 void
-TinyProfiler::MemoryInitialize () noexcept
+TinyProfiler::MemoryInitialize ()
 {
     {
         amrex::ParmParse pp("tiny_profiler");
@@ -695,7 +695,7 @@ TinyProfiler::PrintStats (std::map<std::string,Stats>& regstats, double dt_max,
         std::sort(allprocstats.begin(), allprocstats.end(), ProcStats::compin);
         if (print_other_procstat) {
             // make sure "Other" is printed at the end of the list
-            allprocstats.push_back(other_procstat);
+            allprocstats.push_back(std::move(other_procstat));
         }
         *os << "\n" << hline << "\n";
         *os << std::left
@@ -775,7 +775,7 @@ TinyProfiler::PrintMemStats (std::map<std::string, MemStat>& memstats,
         std::vector<Long> avgmem_vec(nprocs);
         std::vector<Long> maxmem_vec(nprocs);
 
-        if (nprocs == 1)
+        if (ParallelDescriptor::NProcs() == 1)
         {
             nalloc_vec[0] = nalloc;
             nfree_vec[0] = nfree;
@@ -805,7 +805,7 @@ TinyProfiler::PrintMemStats (std::map<std::string, MemStat>& memstats,
             pst.avgmem_avg /= nprocs;
             pst.maxmem_avg /= nprocs;
             pst.fname = it.first;
-            allprocstats.push_back(pst);
+            allprocstats.push_back(std::move(pst));
         }
     }
 

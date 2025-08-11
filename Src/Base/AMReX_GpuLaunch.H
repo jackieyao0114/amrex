@@ -34,9 +34,13 @@
 #ifdef AMREX_USE_CUDA
 #  define AMREX_LAUNCH_KERNEL(MT, blocks, threads, sharedMem, stream, ... ) \
         amrex::launch_global<MT><<<blocks, threads, sharedMem, stream>>>(__VA_ARGS__)
+#  define AMREX_LAUNCH_KERNEL_NOBOUND(blocks, threads, sharedMem, stream, ... ) \
+        amrex::launch_global    <<<blocks, threads, sharedMem, stream>>>(__VA_ARGS__)
 #elif defined(AMREX_USE_HIP)
 #  define AMREX_LAUNCH_KERNEL(MT, blocks, threads, sharedMem, stream, ... ) \
         hipLaunchKernelGGL(launch_global<MT>, blocks, threads, sharedMem, stream, __VA_ARGS__)
+#  define AMREX_LAUNCH_KERNEL_NOBOUND(blocks, threads, sharedMem, stream, ... ) \
+        hipLaunchKernelGGL(launch_global    , blocks, threads, sharedMem, stream, __VA_ARGS__)
 #endif
 
 
@@ -230,10 +234,119 @@ namespace Gpu {
 #else
 #include <AMReX_GpuLaunchMacrosC.H>
 #include <AMReX_GpuLaunchFunctsC.H>
+#include <AMReX_SIMD.H>
 #endif
 
 #include <AMReX_GpuLaunch.nolint.H>
 
 #include <AMReX_CTOParallelForImpl.H>
+
+namespace amrex {
+
+#if defined(AMREX_USE_GPU) || !defined(AMREX_USE_OMP)
+
+template <typename T, typename L, typename M=std::enable_if_t<std::is_integral_v<T>> >
+void ParallelForOMP (T n, L const& f) noexcept
+{
+    ParallelFor(n, f);
+}
+
+template <typename L>
+void ParallelForOMP (Box const& box, L const& f) noexcept
+{
+    ParallelFor(box, f);
+}
+
+template <typename T, typename L, typename M=std::enable_if_t<std::is_integral_v<T>> >
+void ParallelForOMP (Box const& box, T ncomp, L const& f) noexcept
+{
+    ParallelFor(box, ncomp, f);
+}
+
+#else /* !defined(AMREX_USE_GPU) && defined(AMREX_USE_OMP) */
+
+template <typename T, typename L, typename M=std::enable_if_t<std::is_integral_v<T>> >
+AMREX_ATTRIBUTE_FLATTEN_FOR
+void ParallelForOMP (T n, L const& f) noexcept
+{
+#pragma omp parallel for
+    for (T i = 0; i < n; ++i) {
+        f(i);
+    }
+}
+
+template <typename L>
+AMREX_ATTRIBUTE_FLATTEN_FOR
+void ParallelForOMP (Box const& box, L const& f) noexcept
+{
+    auto lo = amrex::lbound(box);
+    auto hi = amrex::ubound(box);
+#if (AMREX_SPACEDIM == 1)
+#pragma omp parallel for
+    for (int i = lo.x; i <= hi.x; ++i) {
+        f(i,0,0);
+    }
+#elif (AMREX_SPACEDIM == 2)
+#pragma omp parallel for
+    for     (int j = lo.y; j <= hi.y; ++j) {
+        AMREX_PRAGMA_SIMD
+        for (int i = lo.x; i <= hi.x; ++i) {
+            f(i,j,0);
+        }
+    }
+#else
+#pragma omp parallel for collapse(2)
+    for         (int k = lo.z; k <= hi.z; ++k) {
+        for     (int j = lo.y; j <= hi.y; ++j) {
+            AMREX_PRAGMA_SIMD
+            for (int i = lo.x; i <= hi.x; ++i) {
+                f(i,j,k);
+            }
+        }
+    }
+#endif
+}
+
+template <typename T, typename L, typename M=std::enable_if_t<std::is_integral_v<T>> >
+AMREX_ATTRIBUTE_FLATTEN_FOR
+void ParallelForOMP (Box const& box, T ncomp, L const& f) noexcept
+{
+    auto lo = amrex::lbound(box);
+    auto hi = amrex::ubound(box);
+#if (AMREX_SPACEDIM == 1)
+#pragma omp parallel for collapse(2)
+    for (T n = 0; n < ncomp; ++n) {
+        for (int i = lo.x; i <= hi.x; ++i) {
+            f(i,0,0,n);
+        }
+    }
+#elif (AMREX_SPACEDIM == 2)
+#pragma omp parallel for collapse(2)
+    for (T n = 0; n < ncomp; ++n) {
+        for     (int j = lo.y; j <= hi.y; ++j) {
+            AMREX_PRAGMA_SIMD
+            for (int i = lo.x; i <= hi.x; ++i) {
+                f(i,j,0,n);
+            }
+        }
+    }
+#else
+#pragma omp parallel for collapse(3)
+    for (T n = 0; n < ncomp; ++n) {
+        for         (int k = lo.z; k <= hi.z; ++k) {
+            for     (int j = lo.y; j <= hi.y; ++j) {
+                AMREX_PRAGMA_SIMD
+                for (int i = lo.x; i <= hi.x; ++i) {
+                    f(i,j,k,n);
+                }
+            }
+        }
+    }
+#endif
+}
+
+#endif
+
+}
 
 #endif

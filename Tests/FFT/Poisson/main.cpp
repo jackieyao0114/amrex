@@ -42,7 +42,7 @@ void make_rhs (MultiFab& rhs, Geometry const& geom,
                        fft_bc[idim].second == FFT::Boundary::odd) {
                 r *= std::sin(x*1.5_rt*fac[idim]);
             } else if (fft_bc[idim].first == FFT::Boundary::odd &&
-                               fft_bc[idim].second == FFT::Boundary::even) {
+                       fft_bc[idim].second == FFT::Boundary::even) {
                 r *= std::sin(x*0.75_rt*fac[idim]);
             } else if (fft_bc[idim].first == FFT::Boundary::even &&
                        fft_bc[idim].second == FFT::Boundary::odd) {
@@ -56,10 +56,13 @@ void make_rhs (MultiFab& rhs, Geometry const& geom,
     });
 
     bool has_dirichlet = false;
+    auto domlen = geom.Domain().length();
     for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-        has_dirichlet = has_dirichlet ||
-            fft_bc[idim].first == FFT::Boundary::odd ||
-            fft_bc[idim].second == FFT::Boundary::odd;
+        if (domlen[idim] > 1) {
+            has_dirichlet = has_dirichlet ||
+                fft_bc[idim].first == FFT::Boundary::odd ||
+                fft_bc[idim].second == FFT::Boundary::odd;
+        }
     }
     if (! has_dirichlet) {
         // Shift rhs so that its sum is zero.
@@ -69,13 +72,9 @@ void make_rhs (MultiFab& rhs, Geometry const& geom,
 }
 
 std::pair<Real,Real> check_convergence
-    (MultiFab const& soln, MultiFab const& rhs, Geometry const& geom,
-     Array<std::pair<FFT::Boundary,FFT::Boundary>,AMREX_SPACEDIM> const& fft_bc)
+    (MultiFab const& phi, MultiFab const& rhs, Geometry const& geom)
 {
-    MultiFab phi(soln.boxArray(), soln.DistributionMap(), 1, 1);
-    MultiFab res(soln.boxArray(), soln.DistributionMap(), 1, 0);
-    MultiFab::Copy(phi, soln, 0, 0, 1, 0);
-    phi.FillBoundary(geom.periodicity());
+    MultiFab res(phi.boxArray(), phi.DistributionMap(), 1, 0);
     auto const& res_ma = res.arrays();
     auto const& phi_ma = phi.const_arrays();
     auto const& rhs_ma = rhs.const_arrays();
@@ -84,47 +83,21 @@ std::pair<Real,Real> check_convergence
         {AMREX_D_DECL(1._rt/(dx[0]*dx[0]),
                       1._rt/(dx[1]*dx[1]),
                       1._rt/(dx[2]*dx[2]))};
-    AMREX_D_TERM(int n_cell_x = geom.Domain().length(0);,
-                 int n_cell_y = geom.Domain().length(1);,
-                 int n_cell_z = geom.Domain().length(2));
+    auto domlen = geom.Domain().length();
     ParallelFor(res, [=] AMREX_GPU_DEVICE (int b, int i, int j, int k)
     {
         auto const& phia = phi_ma[b];
         Real lap = 0;
-        if (i == 0 && fft_bc[0].first == FFT::Boundary::odd) {
-            lap += (-3._rt*phia(i,j,k)+phia(i+1,j,k)) * lapfac[0];
-        } else if (i == 0 && fft_bc[0].first == FFT::Boundary::even) {
-            lap += (-phia(i,j,k)+phia(i+1,j,k)) * lapfac[0];
-        } else if (i == n_cell_x-1 && fft_bc[0].second == FFT::Boundary::odd) {
-            lap += (phia(i-1,j,k)-3._rt*phia(i,j,k)) * lapfac[0];
-        } else if (i == n_cell_x-1 && fft_bc[0].second == FFT::Boundary::even) {
-            lap += (phia(i-1,j,k)-phia(i,j,k)) * lapfac[0];
-        } else {
+        if (domlen[0] > 1) {
             lap += (phia(i-1,j,k)-2._rt*phia(i,j,k)+phia(i+1,j,k)) * lapfac[0];
         }
 #if (AMREX_SPACEDIM >= 2)
-        if (j == 0 && fft_bc[1].first == FFT::Boundary::odd) {
-            lap += (-3._rt*phia(i,j,k)+phia(i,j+1,k)) * lapfac[1];
-        } else if (j == 0 && fft_bc[1].first == FFT::Boundary::even) {
-            lap += (-phia(i,j,k)+phia(i,j+1,k)) * lapfac[1];
-        } else if (j == n_cell_y-1 && fft_bc[1].second == FFT::Boundary::odd) {
-            lap += (phia(i,j-1,k)-3._rt*phia(i,j,k)) * lapfac[1];
-        } else if (j == n_cell_y-1 && fft_bc[1].second == FFT::Boundary::even) {
-            lap += (phia(i,j-1,k)-phia(i,j,k)) * lapfac[1];
-        } else {
+        if (domlen[1] > 1) {
             lap += (phia(i,j-1,k)-2._rt*phia(i,j,k)+phia(i,j+1,k)) * lapfac[1];
         }
 #endif
 #if (AMREX_SPACEDIM == 3)
-        if (k == 0 && fft_bc[2].first == FFT::Boundary::odd) {
-            lap += (-3._rt*phia(i,j,k)+phia(i,j,k+1)) * lapfac[2];
-        } else if (k == 0 && fft_bc[2].first == FFT::Boundary::even) {
-            lap += (-phia(i,j,k)+phia(i,j,k+1)) * lapfac[2];
-        } else if (k == n_cell_z-1 && fft_bc[2].second == FFT::Boundary::odd) {
-            lap += (phia(i,j,k-1)-3._rt*phia(i,j,k)) * lapfac[2];
-        } else if (k == n_cell_z-1 && fft_bc[2].second == FFT::Boundary::even) {
-            lap += (phia(i,j,k-1)-phia(i,j,k)) * lapfac[2];
-        } else {
+        if (domlen[2] > 1) {
             lap += (phia(i,j,k-1)-2._rt*phia(i,j,k)+phia(i,j,k+1)) * lapfac[2];
         }
 #endif
@@ -214,14 +187,14 @@ int main (int argc, char* argv[])
             amrex::Print() << ")\n";
 
             MultiFab rhs(ba,dm,1,0);
-            MultiFab soln(ba,dm,1,0);
+            MultiFab soln(ba,dm,1,1);
             soln.setVal(std::numeric_limits<Real>::max());
             make_rhs(rhs, geom, fft_bc);
 
             FFT::Poisson fft_poisson(geom, fft_bc);
             fft_poisson.solve(soln, rhs);
 
-            auto [bnorm, rnorm] = check_convergence(soln, rhs, geom, fft_bc);
+            auto [bnorm, rnorm] = check_convergence(soln, rhs, geom);
             amrex::Print() << "       rhs inf norm " << bnorm << "\n"
                            << "       res inf norm " << rnorm << "\n";
 #ifdef AMREX_USE_FLOAT
@@ -233,26 +206,36 @@ int main (int argc, char* argv[])
         }}}
 
 #if (AMREX_SPACEDIM == 3)
-        {
-            amrex::Print() << "  Testing PoissonHybrid\n";
+        amrex::Print() << "  Testing PoissonHybrid\n";
 
+        icase = 0;
+        for (int zcase = 1; zcase < ncasesz; ++zcase) { // skip periodic z-direction
+        for (int ycase = 0; ycase < ncasesy; ++ycase) {
+        for (int xcase = 0; xcase < ncases ; ++xcase) {
+            ++icase;
             Array<std::pair<FFT::Boundary,FFT::Boundary>,AMREX_SPACEDIM>
-                fft_bc{std::make_pair(FFT::Boundary::periodic,FFT::Boundary::periodic),
-                       std::make_pair(FFT::Boundary::periodic,FFT::Boundary::periodic),
-                       std::make_pair(FFT::Boundary::even,FFT::Boundary::even)};
+                fft_bc{bcs[xcase], bcs[ycase], bcs[zcase]};
+            amrex::Print() << "  (" << icase << ") Testing (";
+            for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
+                amrex::Print() << "(" << getEnumNameString(fft_bc[idim].first)
+                               << "," << getEnumNameString(fft_bc[idim].second)
+                               << ")";
+                if (idim+1 < AMREX_SPACEDIM) { amrex::Print() << " "; }
+            }
+            amrex::Print() << ")\n";
 
             MultiFab rhs(ba,dm,1,0);
-            MultiFab soln(ba,dm,1,0);
+            MultiFab soln(ba,dm,1,1);
             soln.setVal(std::numeric_limits<Real>::max());
             make_rhs(rhs, geom, fft_bc);
 
             Gpu::DeviceVector<Real> dz(n_cell_z, geom.CellSize(2));
             // or Vector<Real> dz(n_cell_z, geom.CellSize(2));
 
-            FFT::PoissonHybrid fft_poisson(geom);
+            FFT::PoissonHybrid fft_poisson(geom, fft_bc);
             fft_poisson.solve(soln, rhs, dz);
 
-            auto [bnorm, rnorm] = check_convergence(soln, rhs, geom, fft_bc);
+            auto [bnorm, rnorm] = check_convergence(soln, rhs, geom);
             amrex::Print() << "       rhs inf norm " << bnorm << "\n"
                            << "       res inf norm " << rnorm << "\n";
 #ifdef AMREX_USE_FLOAT
@@ -261,7 +244,7 @@ int main (int argc, char* argv[])
             auto eps = 1.e-11;
 #endif
             AMREX_ALWAYS_ASSERT(rnorm < eps*bnorm);
-        }
+        }}}
 #endif
     }
 

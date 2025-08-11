@@ -3,8 +3,10 @@
 #include <AMReX_Config.H>
 
 #include <AMReX_BLassert.H>
+#include <AMReX_Box.H>
 #include <AMReX_Enum.H>
 #include <AMReX_INT.H>
+#include <AMReX_IntVect.H>
 #include <AMReX_IParser.H>
 #include <AMReX_Parser.H>
 #include <AMReX_TypeTraits.H>
@@ -15,7 +17,9 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace amrex {
@@ -26,7 +30,9 @@ using Box = BoxND<AMREX_SPACEDIM>;
 template<int dim>
 class IntVectND;
 using IntVect = IntVectND<AMREX_SPACEDIM>;
-class RealVect;
+template<int dim>
+class RealVectND;
+using RealVect = RealVectND<AMREX_SPACEDIM>;
 
 namespace ppdetail {
     template <class T, class Enable = void>
@@ -77,10 +83,17 @@ namespace ppdetail {
               9 10 11 12      # continuation of bigarray
    multi_line_string = "This is a
                         multi-line string."
+   my_2d_table = \
+           # col 1      2      3
+             {{ 11.0,  12.0,  13.0 }   # row 1
+              { 21.0,  22.0,  23.0 }   # row 2
+              { 31.0,  32.0,  33.0 }   # row 3
+              { 41.0,  42.0,  43.0 } } # row 4
    test = apple "boy blue" 10 20 30 40
    FILE = prob_file           # insert contents of this "prob_file" here
 */
-// For values spanning multiple lines, one must use '\' at the end of a line
+// For values spanning multiple lines except for table, one must use '\' at
+// the end of a line
 // for continuation, otherwise it's a runtime error. Note that there must be
 // at least one space before the continuation character `\`.  Multiple lines
 // inside a pair of double quotes are considered a single string containing
@@ -586,6 +599,27 @@ public:
     //! Add a key 'name'with value 'ref' to the end of the PP table.
     void add (const char* name, const std::string& val);
 
+
+    //! Similar to get() but store the whole line including empty spaces in
+    //! the middle if present as a single string. For example, `foo = a b c`
+    //! is treated by this function as a single string "a b c", whereas
+    //! get() will give only "a" and getarr() will store the results in
+    //! `std::vectcor<std::string>`. Note this does not preserve the number
+    //! of empty spaces, because of how ParmParse parses the line. For
+    //! example, `a b  c` with two spaces between `b` and `c` will become "a
+    //! b c".
+    void getline (const char* name, std::string& ref) const;
+
+    //! Similar to query() but store the whole line including empty spaces
+    //! in the middle if present as a single string. For example, `foo = a b
+    //! c` is treated by this function as a single string "a b c", whereas
+    //! query() will give only "a" and queryarr() will store the results in
+    //! `std::vectcor<std::string>`. Note this does not preserve the number
+    //! of empty spaces, because of how ParmParse parses the line. For
+    //! example, `a b  c` with two spaces between `b` and `c` will become "a
+    //! b c".
+    int queryline (const char* name, std::string& ref) const;
+
     /**
     * \brief Get the ival'th value of kth occurrence of the requested name.
     * If successful, the value is converted to an IntVect and stored
@@ -1074,6 +1108,7 @@ public:
      * scalar. The return value indicates whether it's found. Note that
      * queryWithParser will be used recursively for unresolved symbols.
      */
+    int queryWithParser (const char* name, bool& ref) const;
     int queryWithParser (const char* name, int& ref) const;
     int queryWithParser (const char* name, long& ref) const;
     int queryWithParser (const char* name, long long& ref) const;
@@ -1086,12 +1121,14 @@ public:
      * symbols. If the number of elements in the input does not equal to
      * `nvals`, it's a runtime error.
      */
+    int queryarrWithParser (const char* name, int nvals, bool* ref) const;
     int queryarrWithParser (const char* name, int nvals, int* ref) const;
     int queryarrWithParser (const char* name, int nvals, long* ref) const;
     int queryarrWithParser (const char* name, int nvals, long long* ref) const;
     int queryarrWithParser (const char* name, int nvals, float* ref) const;
     int queryarrWithParser (const char* name, int nvals, double* ref) const;
-    template <typename T, std::enable_if_t<std::is_same_v<T,int> ||
+    template <typename T, std::enable_if_t<std::is_same_v<T,bool> ||
+                                           std::is_same_v<T,int> ||
                                            std::is_same_v<T,long> ||
                                            std::is_same_v<T,long long> ||
                                            std::is_same_v<T,float> ||
@@ -1112,12 +1149,13 @@ public:
      * scalar. If not, the value in `ref` will be added to the ParmParse
      * database. The return value indicates whether it's found.
      */
-    template <typename T, std::enable_if_t<std::is_same_v<T,int> ||
+    template <typename T, std::enable_if_t<std::is_same_v<T,bool> ||
+                                           std::is_same_v<T,int> ||
                                            std::is_same_v<T,long> ||
                                            std::is_same_v<T,long long> ||
                                            std::is_same_v<T,float> ||
                                            std::is_same_v<T,double>,int> = 0>
-    int queryAddWithParser (const char* name, T& ref) const
+    int queryAddWithParser (const char* name, T& ref)
     {
         int exist = this->queryWithParser(name, ref);
         if (!exist) {
@@ -1131,7 +1169,8 @@ public:
      * to parse the entire list of empty space separated values as a single
      * scalar. If not, it's a runtime error.
      */
-    template <typename T, std::enable_if_t<std::is_same_v<T,int> ||
+    template <typename T, std::enable_if_t<std::is_same_v<T,bool> ||
+                                           std::is_same_v<T,int> ||
                                            std::is_same_v<T,long> ||
                                            std::is_same_v<T,long long> ||
                                            std::is_same_v<T,float> ||
@@ -1149,7 +1188,8 @@ public:
      * error. If the number of elements does not equal to `nvals`, it's also
      * a runtime error.
      */
-    template <typename T, std::enable_if_t<std::is_same_v<T,int> ||
+    template <typename T, std::enable_if_t<std::is_same_v<T,bool> ||
+                                           std::is_same_v<T,int> ||
                                            std::is_same_v<T,long> ||
                                            std::is_same_v<T,long long> ||
                                            std::is_same_v<T,float> ||
@@ -1167,7 +1207,8 @@ public:
      * error. If the number of elements does not equal to `nvals`, it's also
      * a runtime error.
      */
-    template <typename T, std::enable_if_t<std::is_same_v<T,int> ||
+    template <typename T, std::enable_if_t<std::is_same_v<T,bool> ||
+                                           std::is_same_v<T,int> ||
                                            std::is_same_v<T,long> ||
                                            std::is_same_v<T,long long> ||
                                            std::is_same_v<T,float> ||
@@ -1185,7 +1226,8 @@ public:
      *
      * For unknown symbols, ParmParse database will be queried.
      */
-    template <typename T, std::enable_if_t<std::is_same_v<T,int> ||
+    template <typename T, std::enable_if_t<std::is_same_v<T,bool> ||
+                                           std::is_same_v<T,int> ||
                                            std::is_same_v<T,long> ||
                                            std::is_same_v<T,long long> ||
                                            std::is_same_v<T,float> ||
@@ -1565,6 +1607,31 @@ public:
                                        Vector<std::string> const& vars) const;
 
     /**
+     * \brief Query vector of vector. The return value indicates whether
+     * it's found. The table (i.e., vector of vector) is in the format of
+     * `{{a00, a01, a02...} {a10, a11, a12...} ...}`.
+     */
+    int querytable (const char* name, std::vector<std::vector<double>>& ref) const;
+    int querytable (const char* name, std::vector<std::vector<float>>& ref) const;
+    int querytable (const char* name, std::vector<std::vector<int>>& ref) const;
+
+    /**
+     * \brief Get vector of vector. It's an error if it is not found.  The
+     * table (i.e., vector of vector) is in the format of
+     * `{{a00, a01, * a02...} {a10, a11, a12...} ...}`.
+     */
+    template <typename T>
+    void gettable (const char* name, std::vector<std::vector<T>>& ref) const
+    {
+        if (this->querytable(name, ref) == 0) {
+            amrex::ErrorStream() << "ParmParse::gettable: " << name
+                                 << " not found in database\n";
+            ParmParse::dumpTable(amrex::ErrorStream());
+            amrex::Abort();
+        }
+    }
+
+    /**
     * \brief Construct an initial ParmParse object from the argc and argv
     * passed in to main().  An error will be signalled if another
     * ParmParse object currently exists.  If parfile is specified,
@@ -1612,6 +1679,17 @@ public:
         // vector<vector<std::string>>.
         std::vector<std::vector<std::string>> m_vals;
         mutable Long                          m_count = 0;
+        std::variant<
+            std::string*,
+            bool*,
+            int*,
+            long*,
+            long long*,
+            amrex::IntVect*,
+            amrex::Box*,
+            float*,
+            double*
+        > m_typehint = static_cast<std::string*>(nullptr);
     };
     using Table = std::unordered_map<std::string, PP_entry>;
 

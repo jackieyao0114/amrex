@@ -11,6 +11,9 @@
 namespace amrex::FFT
 {
 
+template <typename T> class Poisson;
+template <typename T> class PoissonHybrid;
+
 /**
  * \brief Discrete Fourier Transform
  *
@@ -24,6 +27,9 @@ public:
     using MF = std::conditional_t<std::is_same_v<T,Real>,
                                   MultiFab, FabArray<BaseFab<T> > >;
     using cMF = FabArray<BaseFab<GpuComplex<T> > >;
+
+    template <typename U> friend class Poisson;
+    template <typename U> friend class PoissonHybrid;
 
     R2X (Box const& domain,
          Array<std::pair<Boundary,Boundary>,AMREX_SPACEDIM> const& bc,
@@ -45,7 +51,27 @@ public:
     template <int dim, typename FAB, typename F>
     void post_forward_doit (FAB* fab, F const& f);
 
+    // private function made public for cuda
+    template <typename F>
+    void forwardThenBackward_doit_0 (MF const& inmf, MF& outmf, F const& post_forward,
+                                     IntVect const& ngout = IntVect(0),
+                                     Periodicity const& period = Periodicity::NonPeriodic());
+    template <typename F>
+    void forwardThenBackward_doit_1 (MF const& inmf, MF& outmf, F const& post_forward,
+                                     IntVect const& ngout = IntVect(0),
+                                     Periodicity const& period = Periodicity::NonPeriodic());
+
 private:
+
+    void forward (MF const& inmf, MF& outmf);
+    void forward (MF const& inmf, cMF& outmf);
+    void forward (MF const& inmf);
+    void backward (MF const& inmf, MF& outmf, IntVect const& ngout,
+                   Periodicity const& period);
+    void backward (cMF const& inmf, MF& outmf, IntVect const& ngout,
+                   Periodicity const& period);
+    void backward ();
+
     Box m_dom_0;
     Array<std::pair<Boundary,Boundary>,AMREX_SPACEDIM> m_bc;
 
@@ -88,6 +114,9 @@ private:
     Box m_dom_cy;
     Box m_dom_cz;
 
+    std::unique_ptr<R2X<T>> m_r2x_sub;
+    detail::SubHelper m_sub_helper;
+
     Info m_info;
 };
 
@@ -97,22 +126,37 @@ R2X<T>::R2X (Box const& domain,
              Info const& info)
     : m_dom_0(domain),
       m_bc(bc),
+      m_sub_helper(domain),
       m_info(info)
 {
     BL_PROFILE("FFT::R2X");
 
     static_assert(std::is_same_v<float,T> || std::is_same_v<double,T>);
-    AMREX_ALWAYS_ASSERT(domain.smallEnd() == 0 &&
-                        domain.length(0) > 1 &&
-                        domain.cellCentered());
-#if (AMREX_SPACEDIM == 3)
-    AMREX_ALWAYS_ASSERT(domain.length(1) > 1 || domain.length(2) == 1);
+
+    AMREX_ALWAYS_ASSERT((m_dom_0.numPts() > 1) && (m_info.batch_size == 1));
+#if (AMREX_SPACEDIM == 2)
+    AMREX_ALWAYS_ASSERT(!m_info.twod_mode);
+#else
+    if (m_info.twod_mode) {
+        AMREX_ALWAYS_ASSERT((int(domain.length(0) > 1) +
+                             int(domain.length(1) > 1) +
+                             int(domain.length(2) > 1)) >= 2);
+    }
 #endif
+
     for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-        AMREX_ALWAYS_ASSERT(domain.length(idim) > 1);
         if (bc[idim].first == Boundary::periodic ||
             bc[idim].second == Boundary::periodic) {
             AMREX_ALWAYS_ASSERT(bc[idim].first == bc[idim].second);
+        }
+    }
+
+    {
+        Box subbox = m_sub_helper.make_box(m_dom_0);
+        if (subbox.size() != m_dom_0.size()) {
+            m_r2x_sub = std::make_unique<R2X<T>>
+                (subbox, m_sub_helper.make_array(bc), info);
+            return;
         }
     }
 
@@ -143,7 +187,14 @@ R2X<T>::R2X (Box const& domain,
     } // else: x-fft: r2r(m_rx)
 
 #if (AMREX_SPACEDIM >= 2)
-    if (domain.length(1) > 1) {
+
+#if (AMREX_SPACEDIM == 2)
+    bool batch_on_y = false;
+#else
+    bool batch_on_y = m_info.twod_mode && (m_dom_0.length(2) == 1);
+#endif
+
+    if ((domain.length(1) > 1) && !batch_on_y) {
         if (! m_cx.empty()) {
             // copy(m_cx->m_cy)
             m_dom_cy = Box(IntVect(0), IntVect(AMREX_D_DECL(m_dom_cx.bigEnd(1),
@@ -194,7 +245,7 @@ R2X<T>::R2X (Box const& domain,
 #endif
 
 #if (AMREX_SPACEDIM == 3)
-    if (domain.length(2) > 1) {
+    if (domain.length(2) > 1 && !m_info.twod_mode) {
         if (! m_cy.empty()) {
             // copy(m_cy, m_cz)
             m_dom_cz = Box(IntVect(0), IntVect(AMREX_D_DECL(m_dom_cy.bigEnd(2),
@@ -285,7 +336,7 @@ R2X<T>::R2X (Box const& domain,
     //
 
 #if (AMREX_SPACEDIM >= 2)
-    if (domain.length(1) > 1) {
+    if (!m_cy.empty() || !m_ry.empty()) {
         if (! m_cx.empty()) {
             // copy(m_cx->m_cy)
             m_cmd_cx2cy = std::make_unique<MultiBlockCommMetaData>
@@ -303,7 +354,7 @@ R2X<T>::R2X (Box const& domain,
 #endif
 
 #if (AMREX_SPACEDIM == 3)
-    if (domain.length(2) > 1) {
+    if (!m_cz.empty() || !m_rz.empty()) {
         if (! m_cy.empty()) {
             // copy(m_cy, m_cz)
             m_cmd_cy2cz = std::make_unique<MultiBlockCommMetaData>
@@ -487,11 +538,14 @@ R2X<T>::~R2X ()
 template <typename T>
 T R2X<T>::scalingFactor () const
 {
-    auto r = m_dom_0.numPts();
-    for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-        if (m_bc[idim].first != Boundary::periodic
-            && m_dom_0.length(idim) > 1)
-        {
+    Long r = 1;
+    int ndims = m_info.twod_mode ? AMREX_SPACEDIM-1 : AMREX_SPACEDIM;
+#if (AMREX_SPACEDIM == 3)
+    if (m_info.twod_mode && m_dom_0.length(2) == 1) { ndims = 1; };
+#endif
+    for (int idim = 0; idim < ndims; ++idim) {
+        r *= m_dom_0.length(idim);
+        if (m_bc[idim].first != Boundary::periodic && (m_dom_0.length(idim) > 1)) {
             r *= 2;
         }
     }
@@ -502,9 +556,135 @@ template <typename T>
 template <typename F>
 void R2X<T>::forwardThenBackward (MF const& inmf, MF& outmf, F const& post_forward)
 {
-    BL_PROFILE("FFT::R2X::forwardbackward");
+    forwardThenBackward_doit_0(inmf, outmf, post_forward);
+}
 
-    // forward
+template <typename T>
+template <typename F>
+void R2X<T>::forwardThenBackward_doit_0 (MF const& inmf, MF& outmf,
+                                         F const& post_forward,
+                                         IntVect const& ngout,
+                                         Periodicity const& period)
+{
+    BL_PROFILE("FFT::R2X::forwardbackward_0");
+
+    if (m_r2x_sub) {
+        bool inmf_safe = m_sub_helper.ghost_safe(inmf.nGrowVect());
+        MF inmf_sub, inmf_tmp;
+        if (inmf_safe) {
+            inmf_sub = m_sub_helper.make_alias_mf(inmf);
+        } else {
+            inmf_tmp.define(inmf.boxArray(), inmf.DistributionMap(), 1, 0);
+            inmf_tmp.LocalCopy(inmf, 0, 0, 1, IntVect(0));
+            inmf_sub = m_sub_helper.make_alias_mf(inmf_tmp);
+        }
+
+        bool outmf_safe = m_sub_helper.ghost_safe(outmf.nGrowVect());
+        MF outmf_sub, outmf_tmp;
+        if (outmf_safe) {
+            outmf_sub = m_sub_helper.make_alias_mf(outmf);
+        } else {
+            IntVect const& ngtmp = m_sub_helper.make_safe_ghost(outmf.nGrowVect());
+            outmf_tmp.define(outmf.boxArray(), outmf.DistributionMap(), 1, ngtmp);
+            outmf_sub = m_sub_helper.make_alias_mf(outmf_tmp);
+        }
+
+        IntVect const& subngout = m_sub_helper.make_iv(ngout);
+        Periodicity const& subperiod = m_sub_helper.make_periodicity(period);
+        GpuArray<int,3> const& order = m_sub_helper.xyz_order();
+        m_r2x_sub->forwardThenBackward_doit_1
+            (inmf_sub, outmf_sub,
+             [=] AMREX_GPU_DEVICE (int i, int j, int k, auto& sp)
+             {
+                 GpuArray<int,3> idx{i,j,k};
+                 post_forward(idx[order[0]], idx[order[1]], idx[order[2]], sp);
+             },
+             subngout, subperiod);
+
+        if (!outmf_safe) {
+            outmf.LocalCopy(outmf_tmp, 0, 0, 1, outmf_tmp.nGrowVect());
+        }
+    }
+    else
+    {
+        this->forwardThenBackward_doit_1(inmf, outmf, post_forward, ngout, period);
+    }
+}
+
+template <typename T>
+template <typename F>
+void R2X<T>::forwardThenBackward_doit_1 (MF const& inmf, MF& outmf,
+                                         F const& post_forward,
+                                         IntVect const& ngout,
+                                         Periodicity const& period)
+{
+    BL_PROFILE("FFT::R2X::forwardbackward_1");
+
+    if (m_r2x_sub) {
+        amrex::Abort("R2X::forwardThenBackward_doit_1: How did this happen?");
+    }
+    else
+    {
+        this->forward(inmf);
+
+        // post-forward
+
+        int actual_dim = AMREX_SPACEDIM;
+#if (AMREX_SPACEDIM >= 2)
+        if (m_dom_0.length(1) == 1) { actual_dim = 1; }
+#endif
+#if (AMREX_SPACEDIM == 3)
+        if ((m_dom_0.length(2) == 1) && (m_dom_0.length(1) > 1)) { actual_dim = 2; }
+#endif
+
+        if (actual_dim == 1) {
+            if (m_cx.empty()) {
+                post_forward_doit<0>(detail::get_fab(m_rx), post_forward);
+            } else {
+                post_forward_doit<0>(detail::get_fab(m_cx), post_forward);
+            }
+        }
+#if (AMREX_SPACEDIM >= 2)
+        else if (actual_dim == 2) {
+            if (m_cy.empty()) {
+                post_forward_doit<1>(detail::get_fab(m_ry), post_forward);
+            } else {
+                post_forward_doit<1>(detail::get_fab(m_cy), post_forward);
+            }
+        }
+#endif
+#if (AMREX_SPACEDIM == 3)
+        else if (actual_dim == 3) {
+            if (m_cz.empty()) {
+                post_forward_doit<2>(detail::get_fab(m_rz), post_forward);
+            } else {
+                post_forward_doit<2>(detail::get_fab(m_cz), post_forward);
+            }
+        }
+#endif
+
+        this->backward();
+
+        outmf.ParallelCopy(m_rx, 0, 0, 1, IntVect(0),
+                           amrex::elemwiseMin(ngout,outmf.nGrowVect()), period);
+    }
+}
+
+template <typename T>
+void R2X<T>::forward (MF const& inmf)
+{
+    BL_PROFILE("FFT::R2X::forward");
+
+    if (m_r2x_sub) {
+        if (m_sub_helper.ghost_safe(inmf.nGrowVect())) {
+            m_r2x_sub->forward(m_sub_helper.make_alias_mf(inmf));
+        } else {
+            MF tmp(inmf.boxArray(), inmf.DistributionMap(), 1, 0);
+            tmp.LocalCopy(inmf, 0, 0, 1, IntVect(0));
+            m_r2x_sub->forward(m_sub_helper.make_alias_mf(tmp));
+        }
+        return;
+    }
 
     m_rx.ParallelCopy(inmf, 0, 0, 1);
     if (m_bc[0].first == Boundary::periodic) {
@@ -553,44 +733,123 @@ void R2X<T>::forwardThenBackward (MF const& inmf, MF& outmf, F const& post_forwa
         m_fft_fwd_z.template compute_r2c<Direction::forward>();
     }
 #endif
+}
 
-    // post-forward
+template <typename T>
+void R2X<T>::forward (MF const& inmf, MF& outmf)
+{
+    if (m_r2x_sub)
+    {
+        bool inmf_safe = m_sub_helper.ghost_safe(inmf.nGrowVect());
+        MF inmf_sub, inmf_tmp;
+        if (inmf_safe) {
+            inmf_sub = m_sub_helper.make_alias_mf(inmf);
+        } else {
+            inmf_tmp.define(inmf.boxArray(), inmf.DistributionMap(), 1, 0);
+            inmf_tmp.LocalCopy(inmf, 0, 0, 1, IntVect(0));
+            inmf_sub = m_sub_helper.make_alias_mf(inmf_tmp);
+        }
 
-    int actual_dim = AMREX_SPACEDIM;
-#if (AMREX_SPACEDIM >= 2)
-    if (m_dom_0.length(1) == 1) { actual_dim = 1; }
-#endif
+        bool outmf_safe = m_sub_helper.ghost_safe(outmf.nGrowVect());
+        MF outmf_sub, outmf_tmp;
+        if (outmf_safe) {
+            outmf_sub = m_sub_helper.make_alias_mf(outmf);
+        } else {
+            outmf_tmp.define(outmf.boxArray(), outmf.DistributionMap(), 1, 0);
+            outmf_sub = m_sub_helper.make_alias_mf(outmf_tmp);
+        }
+
+        m_r2x_sub->forward(inmf_sub, outmf_sub);
+
+        if (!outmf_safe) {
+            outmf.LocalCopy(outmf_tmp, 0, 0, 1, IntVect(0));
+        }
+    }
+    else
+    {
+        this->forward(inmf);
+
 #if (AMREX_SPACEDIM == 3)
-    if ((m_dom_0.length(2) == 1) && (m_dom_0.length(1) > 1)) { actual_dim = 2; }
+        if (m_info.twod_mode) {
+            if (m_cy.empty() && !m_ry.empty()) {
+                ParallelCopy(outmf, m_dom_rx, m_ry, 0, 0, 1, IntVect(0), Swap01{});
+            } else if (m_ry.empty() && m_cy.empty() && m_cx.empty()) {
+                outmf.ParallelCopy(m_rx, 0, 0, 1);
+            } else {
+                amrex::Abort("R2X::forward(MF,MF): How did this happen?");
+            }
+        } else
 #endif
+        {
+            amrex::ignore_unused(outmf);
+            amrex::Abort("R2X::forward(MF,MF): TODO");
+        }
+    }
+}
 
-    if (actual_dim == 1) {
-        if (m_cx.empty()) {
-            post_forward_doit<0>(detail::get_fab(m_rx), post_forward);
+template <typename T>
+void R2X<T>::forward (MF const& inmf, cMF& outmf)
+{
+    if (m_r2x_sub)
+    {
+        bool inmf_safe = m_sub_helper.ghost_safe(inmf.nGrowVect());
+        MF inmf_sub, inmf_tmp;
+        if (inmf_safe) {
+            inmf_sub = m_sub_helper.make_alias_mf(inmf);
         } else {
-            post_forward_doit<0>(detail::get_fab(m_cx), post_forward);
+            inmf_tmp.define(inmf.boxArray(), inmf.DistributionMap(), 1, 0);
+            inmf_tmp.LocalCopy(inmf, 0, 0, 1, IntVect(0));
+            inmf_sub = m_sub_helper.make_alias_mf(inmf_tmp);
+        }
+
+        bool outmf_safe = m_sub_helper.ghost_safe(outmf.nGrowVect());
+        cMF outmf_sub, outmf_tmp;
+        if (outmf_safe) {
+            outmf_sub = m_sub_helper.make_alias_mf(outmf);
+        } else {
+            outmf_tmp.define(outmf.boxArray(), outmf.DistributionMap(), 1, 0);
+            outmf_sub = m_sub_helper.make_alias_mf(outmf_tmp);
+        }
+
+        m_r2x_sub->forward(inmf_sub, outmf_sub);
+
+        if (!outmf_safe) {
+            outmf.LocalCopy(outmf_tmp, 0, 0, 1, IntVect(0));
         }
     }
-#if (AMREX_SPACEDIM >= 2)
-    else if (actual_dim == 2) {
-        if (m_cy.empty()) {
-            post_forward_doit<1>(detail::get_fab(m_ry), post_forward);
-        } else {
-            post_forward_doit<1>(detail::get_fab(m_cy), post_forward);
-        }
-    }
-#endif
+    else
+    {
+        this->forward(inmf);
+
 #if (AMREX_SPACEDIM == 3)
-    else if (actual_dim == 3) {
-        if (m_cz.empty()) {
-            post_forward_doit<2>(detail::get_fab(m_rz), post_forward);
-        } else {
-            post_forward_doit<2>(detail::get_fab(m_cz), post_forward);
+        if (m_info.twod_mode) {
+            if (!m_cy.empty()) {
+                auto lo = m_dom_cy.smallEnd();
+                auto hi = m_dom_cy.bigEnd();
+                std::swap(lo[0],lo[1]);
+                std::swap(hi[0],hi[1]);
+                Box dom(lo,hi);
+                ParallelCopy(outmf, dom, m_cy, 0, 0, 1, IntVect(0), Swap01{});
+            } else if (m_ry.empty() && m_cy.empty() && !m_cx.empty()) {
+                outmf.ParallelCopy(m_cx, 0, 0, 1);
+            } else {
+                amrex::Abort("R2X::forward(MF,cMF): How did this happen?");
+            }
+        } else
+#endif
+        {
+            amrex::ignore_unused(outmf);
+            amrex::Abort("R2X::forward(MF,cMF): TODO");
         }
     }
-#endif
+}
 
-    // backward
+template <typename T>
+void R2X<T>::backward ()
+{
+    BL_PROFILE("FFT::R2X::backward");
+
+    AMREX_ALWAYS_ASSERT(m_r2x_sub == nullptr);
 
 #if (AMREX_SPACEDIM == 3)
     if (m_bc[2].first != Boundary::periodic)
@@ -638,16 +897,136 @@ void R2X<T>::forwardThenBackward (MF const& inmf, MF& outmf, F const& post_forwa
     } else {
         m_fft_bwd_x.template compute_r2r<Direction::backward>();
     }
-    outmf.ParallelCopy(m_rx, 0, 0, 1);
+}
+
+template <typename T>
+void R2X<T>::backward (MF const& inmf, MF& outmf, IntVect const& ngout,
+                       Periodicity const& period)
+{
+    if (m_r2x_sub)
+    {
+        bool inmf_safe = m_sub_helper.ghost_safe(inmf.nGrowVect());
+        MF inmf_sub, inmf_tmp;
+        if (inmf_safe) {
+            inmf_sub = m_sub_helper.make_alias_mf(inmf);
+        } else {
+            inmf_tmp.define(inmf.boxArray(), inmf.DistributionMap(), 1, 0);
+            inmf_tmp.LocalCopy(inmf, 0, 0, 1, IntVect(0));
+            inmf_sub = m_sub_helper.make_alias_mf(inmf_tmp);
+        }
+
+        bool outmf_safe = m_sub_helper.ghost_safe(outmf.nGrowVect());
+        MF outmf_sub, outmf_tmp;
+        if (outmf_safe) {
+            outmf_sub = m_sub_helper.make_alias_mf(outmf);
+        } else {
+            IntVect const& ngtmp = m_sub_helper.make_safe_ghost(outmf.nGrowVect());
+            outmf_tmp.define(outmf.boxArray(), outmf.DistributionMap(), 1, ngtmp);
+            outmf_sub = m_sub_helper.make_alias_mf(outmf_tmp);
+        }
+
+        IntVect const& subngout = m_sub_helper.make_iv(ngout);
+        Periodicity const& subperiod = m_sub_helper.make_periodicity(period);
+        m_r2x_sub->backward(inmf_sub, outmf_sub, subngout, subperiod);
+
+        if (!outmf_safe) {
+            outmf.LocalCopy(outmf_tmp, 0, 0, 1, outmf_tmp.nGrowVect());
+        }
+    }
+    else
+    {
+#if (AMREX_SPACEDIM == 3)
+        if (m_info.twod_mode) {
+            if (m_cy.empty() && !m_ry.empty()) {
+                ParallelCopy(m_ry, m_dom_ry, inmf, 0, 0, 1, IntVect(0), Swap01{});
+            } else if (m_ry.empty() && m_cy.empty() && m_cx.empty()) {
+                m_rx.ParallelCopy(inmf, 0, 0, 1);
+            } else {
+                amrex::Abort("R2X::backward(MF,MF): How did this happen?");
+            }
+        } else
+#endif
+        {
+            amrex::ignore_unused(inmf,outmf,ngout,period);
+            amrex::Abort("R2X::backward(MF,MF): TODO");
+        }
+
+        this->backward();
+
+        outmf.ParallelCopy(m_rx, 0, 0, 1, IntVect(0),
+                           amrex::elemwiseMin(ngout,outmf.nGrowVect()), period);
+    }
+}
+
+template <typename T>
+void R2X<T>::backward (cMF const& inmf, MF& outmf, IntVect const& ngout,
+                       Periodicity const& period)
+{
+    if (m_r2x_sub)
+    {
+        bool inmf_safe = m_sub_helper.ghost_safe(inmf.nGrowVect());
+        cMF inmf_sub, inmf_tmp;
+        if (inmf_safe) {
+            inmf_sub = m_sub_helper.make_alias_mf(inmf);
+        } else {
+            inmf_tmp.define(inmf.boxArray(), inmf.DistributionMap(), 1, 0);
+            inmf_tmp.LocalCopy(inmf, 0, 0, 1, IntVect(0));
+            inmf_sub = m_sub_helper.make_alias_mf(inmf_tmp);
+        }
+
+        bool outmf_safe = m_sub_helper.ghost_safe(outmf.nGrowVect());
+        MF outmf_sub, outmf_tmp;
+        if (outmf_safe) {
+            outmf_sub = m_sub_helper.make_alias_mf(outmf);
+        } else {
+            IntVect const& ngtmp = m_sub_helper.make_safe_ghost(outmf.nGrowVect());
+            outmf_tmp.define(outmf.boxArray(), outmf.DistributionMap(), 1, ngtmp);
+            outmf_sub = m_sub_helper.make_alias_mf(outmf_tmp);
+        }
+
+        IntVect const& subngout = m_sub_helper.make_iv(ngout);
+        Periodicity const& subperiod = m_sub_helper.make_periodicity(period);
+        m_r2x_sub->backward(inmf_sub, outmf_sub, subngout, subperiod);
+
+        if (!outmf_safe) {
+            outmf.LocalCopy(outmf_tmp, 0, 0, 1, outmf_tmp.nGrowVect());
+        }
+    }
+    else
+    {
+#if (AMREX_SPACEDIM == 3)
+        if (m_info.twod_mode) {
+            if (!m_cy.empty()) {
+                ParallelCopy(m_cy, m_dom_cy, inmf, 0, 0, 1, IntVect(0), Swap01{});
+            } else if (m_ry.empty() && m_cy.empty() && !m_cx.empty()) {
+                m_cx.ParallelCopy(inmf, 0, 0, 1);
+            } else {
+                amrex::Abort("R2X::backward(cMF,MF): How did this happen?");
+            }
+        } else
+#endif
+        {
+            amrex::ignore_unused(inmf,outmf,ngout,period);
+            amrex::Abort("R2X::backward(cMF,MF): TODO");
+        }
+
+        this->backward();
+
+        outmf.ParallelCopy(m_rx, 0, 0, 1, IntVect(0),
+                           amrex::elemwiseMin(ngout,outmf.nGrowVect()), period);
+    }
 }
 
 template <typename T>
 template <int dim, typename FAB, typename F>
 void R2X<T>::post_forward_doit (FAB* fab, F const& f)
 {
+    if (m_info.twod_mode) {
+        amrex::Abort("xxxxx post_forward_doit: todo");
+    }
     if (fab) {
         auto const& a = fab->array();
-        ParallelFor(fab->box(),
+        ParallelForOMP(fab->box(),
         [f=f,a=a] AMREX_GPU_DEVICE (int i, int j, int k)
         {
             if constexpr (dim == 0) {
